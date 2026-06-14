@@ -677,11 +677,15 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
     });
   };
 
-  const triggerGrade = (known) => {
-    setLeaving(known ? 1 : -1);
-    setTimeout(() => { setLeaving(0); advance(known); }, 180);
+  const triggerGrade = (known, animate) => {
+    if (animate) {
+      setLeaving(known ? 1 : -1);
+      setTimeout(() => { setLeaving(0); advance(known); }, 200);
+    } else {
+      advance(known); // 버튼 채점: 모션 없음
+    }
   };
-  const grade = (known) => triggerGrade(known);
+  const grade = (known) => triggerGrade(known, false);
 
   const toggleStar = () => {
     setCards((prev) => prev.map((c) => (c.id === currentId ? { ...c, starred: !c.starred } : c)));
@@ -704,8 +708,8 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
   const onTouchEnd = () => {
     const dx = drag;
     swipe.current.active = false;
-    if (dx <= -90) { setDrag(0); triggerGrade(false); }
-    else if (dx >= 90) { setDrag(0); triggerGrade(true); }
+    if (dx <= -90) { setDrag(0); triggerGrade(false, true); }
+    else if (dx >= 90) { setDrag(0); triggerGrade(true, true); }
     else setDrag(0);
   };
 
@@ -771,9 +775,8 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
   const pct = total > 0 ? Math.round((s.doneCount / total) * 100) : 0;
 
   const dragOut = leaving !== 0;
-  const tx = dragOut ? leaving * 500 : drag;
-  const rot = tx * 0.03;
-  const opacity = dragOut ? 0 : 1 - Math.min(Math.abs(drag) / 600, 0.25);
+  const tx = dragOut ? leaving * 600 : drag;
+  const opacity = dragOut ? 0 : 1 - Math.min(Math.abs(drag) / 700, 0.2);
 
   return (
     <div className="study">
@@ -795,10 +798,10 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
         style={{
-          transform: `translateX(${tx}px) rotate(${rot}deg)`,
+          transform: `translateX(${tx}px)`,
           opacity,
           transition: (drag === 0 || dragOut)
-            ? "transform .22s cubic-bezier(.33,0,.2,1), opacity .22s ease"
+            ? "transform .28s cubic-bezier(.25,.1,.25,1), opacity .28s ease"
             : "none",
         }}
       >
@@ -1212,7 +1215,9 @@ function ListView({ cards, setCards, voiceRef }) {
         if (fa !== fb) return fb - fa;
         if (sort === "kana") return kanaKey(a.c).localeCompare(kanaKey(b.c), "ja");
         if (sort === "seen") return (b.c.seen || 0) - (a.c.seen || 0);
-        // recent: seq 내림차순
+        // recent(등록순): 사용자가 추가한 단어를 맨 위로, 그다음 seq 내림차순
+        const ua = a.c.fromSeed === false ? 1 : 0, ub = b.c.fromSeed === false ? 1 : 0;
+        if (ua !== ub) return ub - ua;
         const sa = a.c.seq, sb = b.c.seq;
         if (sa == null && sb == null) return b.i - a.i;
         if (sa == null) return 1;
@@ -1224,6 +1229,9 @@ function ListView({ cards, setCards, voiceRef }) {
 
   const suspend = (id) => {
     setCards((prev) => prev.map((c) => (c.id === id ? { ...c, suspended: true } : c)));
+  };
+  const toggleStar = (id) => {
+    setCards((prev) => prev.map((c) => (c.id === id ? { ...c, starred: !c.starred } : c)));
   };
   const unsuspend = (id) => {
     setCards((prev) => prev.map((c) => (c.id === id ? { ...c, suspended: false } : c)));
@@ -1277,7 +1285,7 @@ function ListView({ cards, setCards, voiceRef }) {
 
       <div className="list-chips">
         <button className={"list-chip" + (flt === "all" ? " on" : "")} onClick={() => setFlt("all")}>전체</button>
-        <button className={"list-chip" + (flt === "weak" ? " on" : "")} onClick={() => setFlt("weak")}>약점{counts.weak ? " " + counts.weak : ""}</button>
+        <button className={"list-chip list-chip-weak" + (flt === "weak" ? " on" : "")} onClick={() => setFlt("weak")}>약점{counts.weak ? " " + counts.weak : ""}</button>
         <button className={"list-chip list-chip-fav" + (flt === "fav" ? " on" : "")} onClick={() => setFlt("fav")}>
           <Icon.Star filled={true} />{counts.fav ? " " + counts.fav : ""}
         </button>
@@ -1310,20 +1318,27 @@ function ListView({ cards, setCards, voiceRef }) {
         {filtered.map((c) => {
           const st = statusLabel(c);
           return (
-            <button className="row" key={c.id} onClick={() => setOpenId(c.id)}>
-              <div className="row-word">
-                <div className="row-jp">
-                  {c.starred && <span className="row-star"><Icon.Star filled={true} /></span>}
-                  {c.word}
-                  {c.hasKanji && c.reading && <span className="row-reading">{c.reading}</span>}
+            <div className="row" key={c.id}>
+              <button className="row-main" onClick={() => setOpenId(c.id)}>
+                <div className="row-word">
+                  <div className="row-jp">
+                    {c.word}
+                    {c.hasKanji && c.reading && <span className="row-reading">{c.reading}</span>}
+                  </div>
+                  <div className="row-meaning">{c.meaning}</div>
                 </div>
-                <div className="row-meaning">{c.meaning}</div>
-              </div>
-              <div className="row-tags">
-                {isWeak(c) && <span className="tag tag-weak">약점</span>}
-                <span className={"tag " + st.cls}>{st.text}</span>
-              </div>
-            </button>
+                <div className="row-tags">
+                  {isWeak(c) && <span className="tag tag-weak">약점</span>}
+                  <span className={"tag " + st.cls}>{st.text}</span>
+                </div>
+              </button>
+              <button
+                className={"row-star-btn" + (c.starred ? " on" : "")}
+                onClick={() => toggleStar(c.id)}
+                aria-label="즐겨찾기">
+                <Icon.Star filled={!!c.starred} />
+              </button>
+            </div>
           );
         })}
       </div>
@@ -1437,12 +1452,13 @@ function buildQuizRound(cards, mode) {
   });
 }
 
-function QuizView({ cards, setCards }) {
+function QuizView({ cards, setCards, setQuizLog }) {
   const [mode, setMode] = useState("meaning"); // meaning=뜻맞추기, word=단어맞추기
   const [round, setRound] = useState([]);      // 이번 라운드 문제 배열
   const [qi, setQi] = useState(0);             // 현재 문제 인덱스
   const [picked, setPicked] = useState(null);
   const [correct, setCorrect] = useState(0);
+  const [wrongList, setWrongList] = useState([]); // 틀린 문제 [{answerId, pickedId}]
   const [finished, setFinished] = useState(false);
 
   const pool = useMemo(() => cards.filter((c) => c.word && c.meaning), [cards]);
@@ -1454,6 +1470,7 @@ function QuizView({ cards, setCards }) {
     setQi(0);
     setPicked(null);
     setCorrect(0);
+    setWrongList([]);
     setFinished(false);
   };
 
@@ -1484,6 +1501,7 @@ function QuizView({ cards, setCards }) {
   if (finished) {
     const total = round.length;
     const rate = Math.round((correct / total) * 100);
+    const byId = (id) => cards.find((c) => c.id === id);
     return (
       <div className="quiz">
         <h2 className="view-title">퀴즈 결과</h2>
@@ -1491,6 +1509,36 @@ function QuizView({ cards, setCards }) {
           <div className="quiz-result-rate">{rate}%</div>
           <div className="quiz-result-sub">{total}문제 중 {correct}개 정답</div>
         </div>
+
+        {wrongList.length > 0 && (
+          <div className="quiz-review">
+            <div className="quiz-review-title">틀린 문제 {wrongList.length}개</div>
+            {wrongList.map((w, idx) => {
+              const ans = byId(w.answerId);
+              const pick = byId(w.pickedId);
+              if (!ans) return null;
+              // 문제는 출제 방식에 따라: 뜻맞추기=단어 제시, 단어맞추기=뜻 제시
+              const askWord = mode === "word";
+              const question = askWord ? ans.meaning : (ans.word + (ans.hasKanji && ans.reading ? ` (${ans.reading})` : ""));
+              const answerText = askWord ? (ans.word + (ans.hasKanji && ans.reading ? ` (${ans.reading})` : "")) : ans.meaning;
+              const pickedText = pick ? (askWord ? (pick.word + (pick.hasKanji && pick.reading ? ` (${pick.reading})` : "")) : pick.meaning) : "-";
+              return (
+                <div className="quiz-review-item" key={idx}>
+                  <div className="quiz-review-q">{question}</div>
+                  <div className="quiz-review-line">
+                    <span className="quiz-review-label quiz-review-x">내 답</span>
+                    <span className="quiz-review-wrong-text">{pickedText}</span>
+                  </div>
+                  <div className="quiz-review-line">
+                    <span className="quiz-review-label quiz-review-o">정답</span>
+                    <span className="quiz-review-right-text">{answerText}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         <div className="quiz-start-btns">
           <button className="quiz-start" onClick={() => startRound(mode)}>
             {mode === "meaning" ? "뜻 맞추기" : "단어 맞추기"} 다시
@@ -1524,6 +1572,16 @@ function QuizView({ cards, setCards }) {
     setPicked(i);
     const isRight = q.options[i].id === q.answerId;
     if (isRight) setCorrect((n) => n + 1);
+    else setWrongList((w) => [...w, { answerId: q.answerId, pickedId: q.options[i].id }]);
+    // 오늘 푼 퀴즈 문제 수 +1 (캘린더 5단계 판정용)
+    if (setQuizLog) {
+      setQuizLog((log) => {
+        const today = todayStr();
+        const next = { ...log, [today]: (log[today] || 0) + 1 };
+        saveQuizLog(next);
+        return next;
+      });
+    }
     // 오답/정답을 카드에 반영(약점 단어 추적)
     if (setCards) {
       setCards((prev) => prev.map((c) => {
@@ -1584,7 +1642,7 @@ function QuizView({ cards, setCards }) {
 
 function StatsView({ cards, timeLog, setCards, setTimeLog }) {
   const stats = useMemo(() => {
-    // 학습 횟수 합계 / 학습한 단어 수 / 학습한 날짜 집합
+    // 학습 횟수 합계(개별 단어 채점) / 학습한 단어 수 / 학습한 날짜 집합
     let totalReviews = 0;
     const studiedWords = new Set();
     const learnDays = new Set();
@@ -1595,7 +1653,6 @@ function StatsView({ cards, timeLog, setCards, setTimeLog }) {
         learnDays.add(h.d);
       }
     }
-    // 시간 로그의 날짜도 학습일에 포함
     Object.keys(timeLog).forEach((d) => { if ((timeLog[d] || 0) > 0) learnDays.add(d); });
     const totalSec = Object.values(timeLog).reduce((a, b) => a + (b || 0), 0);
     const mastered = cards.filter((c) => c.suspended || c.box >= 4).length;
@@ -1603,29 +1660,11 @@ function StatsView({ cards, timeLog, setCards, setTimeLog }) {
       days: learnDays.size,
       totalSec,
       words: studiedWords.size,
-      reviews: totalReviews,
+      sessions: Math.floor(totalReviews / NEW_PER_DAY), // 20개 학습 = 1회 (퀴즈 제외)
       mastered,
       total: cards.length,
     };
   }, [cards, timeLog]);
-
-  // 최근 7일: 그날 학습한 단어 수 → 20개 기준 % (100% 초과 가능)
-  const last7 = useMemo(() => {
-    // 날짜별 학습 단어 수(중복 카드 1회)
-    const perDay = {};
-    for (const c of cards) {
-      const days = new Set((c.history || []).map((h) => h.d));
-      days.forEach((d) => { perDay[d] = (perDay[d] || 0) + 1; });
-    }
-    const arr = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(Date.now() - i * DAY).toISOString().slice(0, 10);
-      const words = perDay[d] || 0;
-      arr.push({ d, words, pct: Math.round((words / NEW_PER_DAY) * 100) });
-    }
-    return arr;
-  }, [cards]);
-  const maxPct = Math.max(100, ...last7.map((x) => x.pct));
 
   return (
     <div className="stats">
@@ -1645,7 +1684,7 @@ function StatsView({ cards, timeLog, setCards, setTimeLog }) {
           <div className="stat-card-label">학습한 단어</div>
         </div>
         <div className="stat-card">
-          <div className="stat-card-value">{stats.reviews}<span>회</span></div>
+          <div className="stat-card-value">{stats.sessions}<span>회</span></div>
           <div className="stat-card-label">총 학습 횟수</div>
         </div>
       </div>
@@ -1661,24 +1700,7 @@ function StatsView({ cards, timeLog, setCards, setTimeLog }) {
         </div>
       </div>
 
-      <div className="chart-box">
-        <div className="chart-title">최근 7일 학습량 (20개 기준 %)</div>
-        <div className="chart">
-          {last7.map((x) => (
-            <div className="chart-col" key={x.d}>
-              <div className="chart-val">{x.pct}%</div>
-              <div className="chart-bar-wrap">
-                <div className="chart-bar"
-                  style={{ height: `${(x.pct / maxPct) * 100}%` }}
-                  title={`${x.words}개 (${x.pct}%)`} />
-              </div>
-              <div className="chart-x">{x.d.slice(5).replace("-", "/")}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <StudyCalendar cards={cards} />
+      <StudyCalendar cards={cards} quizLog={quizLog} />
 
       <BackupBox cards={cards} timeLog={timeLog} setCards={setCards} setTimeLog={setTimeLog} />
     </div>
@@ -1687,7 +1709,7 @@ function StatsView({ cards, timeLog, setCards, setTimeLog }) {
 
 /* 데이터 백업/복원: 기기 로컬 JSON 파일로 내보내고 불러오기 */
 /* 연속 학습 캘린더: 깃허브 잔디형. 최근 약 17주간 날짜별 학습 단어 수를 강도로 표시 */
-function StudyCalendar({ cards }) {
+function StudyCalendar({ cards, quizLog }) {
   const { weeks, monthLabels, total } = useMemo(() => {
     // 날짜별 학습 단어 수
     const perDay = {};
@@ -1697,7 +1719,6 @@ function StudyCalendar({ cards }) {
     }
     const WEEKS = 17;
     const today = new Date();
-    // 이번 주 토요일 기준으로 끝을 맞춤(일~토 컬럼)
     const end = new Date(today);
     end.setDate(end.getDate() + (6 - end.getDay())); // 이번 주 토요일
     const start = new Date(end);
@@ -1712,13 +1733,16 @@ function StudyCalendar({ cards }) {
       for (let d = 0; d < 7; d++) {
         const ds = cur.toISOString().slice(0, 10);
         const count = perDay[ds] || 0;
+        const quizN = (quizLog && quizLog[ds]) || 0;
         const future = cur > today;
         if (!future && count > 0) total += 1;
-        // 강도 0~4
-        let lv = 0;
-        if (count > 0) lv = count >= 20 ? 4 : count >= 12 ? 3 : count >= 5 ? 2 : 1;
-        col.push({ ds, count, lv, future });
-        // 월 라벨: 그 주 첫날이 1~7일이면 월 표기
+        // 5단계: 0개=1, 1개이상=2, 20개(100%)=3, 40개(200%)=4, 퀴즈20문제이상=5
+        let lv = 1;
+        if (quizN >= 20) lv = 5;
+        else if (count >= NEW_PER_DAY * 2) lv = 4;
+        else if (count >= NEW_PER_DAY) lv = 3;
+        else if (count > 0) lv = 2;
+        col.push({ ds, count, quizN, lv, future });
         if (d === 0) {
           const dd = cur.getDate();
           monthLabels.push(dd <= 7 ? (cur.getMonth() + 1) + "월" : "");
@@ -1728,7 +1752,7 @@ function StudyCalendar({ cards }) {
       weeks.push(col);
     }
     return { weeks, monthLabels, total };
-  }, [cards]);
+  }, [cards, quizLog]);
 
   return (
     <div className="cal-box">
@@ -1743,18 +1767,18 @@ function StudyCalendar({ cards }) {
               {col.map((cell, di) => (
                 <div key={di}
                   className={"cal-cell cal-lv" + cell.lv + (cell.future ? " cal-future" : "")}
-                  title={cell.future ? "" : `${cell.ds} · ${cell.count}개`} />
+                  title={cell.future ? "" : `${cell.ds} · 학습 ${cell.count}개${cell.quizN ? " · 퀴즈 " + cell.quizN : ""}`} />
               ))}
             </div>
           ))}
         </div>
         <div className="cal-legend">
           <span>적음</span>
-          <span className="cal-cell cal-lv0" />
           <span className="cal-cell cal-lv1" />
           <span className="cal-cell cal-lv2" />
           <span className="cal-cell cal-lv3" />
           <span className="cal-cell cal-lv4" />
+          <span className="cal-cell cal-lv5" />
           <span>많음</span>
         </div>
       </div>
@@ -1819,6 +1843,7 @@ function BackupBox({ cards, timeLog, setCards, setTimeLog }) {
         seen: 0,
         suspended: false,
         history: [],
+        quizMiss: 0,
       }));
       saveCards(cleared);
       return cleared;
@@ -1961,6 +1986,20 @@ function saveTimeLog(log) {
   } catch (e) {}
 }
 
+const QUIZ_KEY = "jp-vocab-quizlog-v1";
+function loadQuizLog() {
+  try {
+    const raw = localStorage.getItem(QUIZ_KEY);
+    if (raw) return JSON.parse(raw) || {};
+  } catch (e) {}
+  return {};
+}
+function saveQuizLog(log) {
+  try {
+    localStorage.setItem(QUIZ_KEY, JSON.stringify(log));
+  } catch (e) {}
+}
+
 /* 연속 학습일 계산: 오늘(또는 어제)부터 거꾸로 학습기록이 끊기지 않은 일수 */
 function calcStreak(timeLog) {
   if (!timeLog) return 0;
@@ -1985,6 +2024,7 @@ function App() {
   const [studySession, setStudySession] = useState(null);
   const [version, setVersion] = useState(1);
   const [timeLog, setTimeLog] = useState(loadTimeLog);
+  const [quizLog, setQuizLog] = useState(loadQuizLog);
   const voiceRef = useJaVoice();
 
   const todaySec = timeLog[todayStr()] || 0;
@@ -2048,8 +2088,8 @@ function App() {
           {tab === "study" && <StudyView cards={cards} setCards={setCards} voiceRef={voiceRef} timeLog={timeLog} session={studySession} setSession={setStudySession} />}
           {tab === "add" && <AddView cards={cards} setCards={setCards} voiceRef={voiceRef} />}
           {tab === "list" && <ListView cards={cards} setCards={setCards} voiceRef={voiceRef} />}
-          {tab === "quiz" && <QuizView cards={cards} setCards={setCards} />}
-          {tab === "stats" && <StatsView cards={cards} timeLog={timeLog} setCards={setCards} setTimeLog={setTimeLog} />}
+          {tab === "quiz" && <QuizView cards={cards} setCards={setCards} setQuizLog={setQuizLog} />}
+          {tab === "stats" && <StatsView cards={cards} timeLog={timeLog} quizLog={quizLog} setCards={setCards} setTimeLog={setTimeLog} setQuizLog={setQuizLog} />}
         </main>
       </div>
 
@@ -2220,6 +2260,19 @@ const CSS = `
 .quiz-result { text-align: center; padding: 30px 0 26px; }
 .quiz-result-rate { font-size: 56px; font-weight: 800; color: var(--accent); letter-spacing: -1px; }
 .quiz-result-sub { font-size: 15px; color: var(--muted); margin-top: 6px; }
+.quiz-review { margin: 4px 0 20px; }
+.quiz-review-title { font-size: 15px; font-weight: 700; color: var(--ink); margin-bottom: 10px; }
+.quiz-review-item { background: var(--surface); border-radius: 14px; padding: 14px 16px;
+  margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.quiz-review-q { font-size: 16px; font-weight: 600; color: var(--ink); margin-bottom: 10px;
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; }
+.quiz-review-line { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.quiz-review-label { flex-shrink: 0; font-size: 11px; font-weight: 700; border-radius: 6px;
+  padding: 2px 7px; }
+.quiz-review-x { background: var(--fill); color: var(--ink-2); }
+.quiz-review-o { background: var(--accent-soft); color: var(--accent-deep); }
+.quiz-review-wrong-text { font-size: 14px; color: var(--muted); text-decoration: line-through; }
+.quiz-review-right-text { font-size: 14px; color: var(--ink); font-weight: 600; }
 .quiz-prompt { background: var(--surface); border-radius: 18px; padding: 32px 20px;
   text-align: center; margin-bottom: 18px;
   box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.05); }
@@ -2264,7 +2317,9 @@ const CSS = `
   background: var(--surface); color: var(--ink-2); font-size: 13px; font-weight: 600; cursor: pointer;
   flex-shrink: 0; white-space: nowrap; }
 .list-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-.list-chip-fav { display: inline-flex; align-items: center; gap: 2px; }
+.list-chip-weak { min-width: 56px; }
+.list-chip-weak.on { background: var(--ink-2); border-color: var(--ink-2); color: #fff; }
+.list-chip-fav { display: inline-flex; align-items: center; gap: 2px; min-width: 48px; justify-content: center; }
 .list-chip-fav svg { width: 14px; height: 14px; }
 .list-sort { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
 .list-sort-label { font-size: 12px; color: var(--muted); margin-right: 2px; }
@@ -2276,7 +2331,7 @@ const CSS = `
 .row-star { display: inline-flex; vertical-align: middle; margin-right: 5px; color: var(--accent); }
 .row-star svg { width: 15px; height: 15px; }
 .row-tags { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
-.tag-weak { background: var(--accent-soft); color: var(--accent-deep); border: 1px solid var(--accent-30); }
+.tag-weak { background: var(--fill); color: var(--ink-2); border: 1px solid var(--line); }
 
 /* 학습 완료 팝업 */
 .finish-screen { display: flex; align-items: flex-start; justify-content: center;
@@ -2345,10 +2400,15 @@ const CSS = `
 .count { font-size: 13px; color: var(--muted); font-weight: 600; }
 .list-search { margin: 6px 0 10px; }
 .rows { display: flex; flex-direction: column; gap: 8px; }
-.row { background: var(--surface); border-radius: 14px; padding: 12px 14px;
-  display: flex; align-items: center; gap: 10px; width: 100%;
-  border: none; cursor: pointer; text-align: left; }
+.row { background: var(--surface); border-radius: 14px;
+  display: flex; align-items: stretch; gap: 0; width: 100%; overflow: hidden; }
 .row:active { background: var(--fill); }
+.row-main { flex: 1; display: flex; align-items: center; gap: 10px;
+  padding: 12px 6px 12px 14px; border: none; background: none; cursor: pointer; text-align: left; }
+.row-star-btn { flex-shrink: 0; width: 44px; border: none; background: none; cursor: pointer;
+  color: var(--line); display: flex; align-items: center; justify-content: center; }
+.row-star-btn.on { color: var(--accent); }
+.row-star-btn svg { width: 20px; height: 20px; }
 .row-word { flex: 1; }
 .row-jp { font-size: 17px; font-weight: 600; color: var(--ink);
   display: flex; align-items: baseline; gap: 8px; }
@@ -2446,11 +2506,11 @@ const CSS = `
 .cal-grid { display: flex; gap: 3px; }
 .cal-col { display: flex; flex-direction: column; gap: 3px; }
 .cal-cell { width: 13px; height: 13px; border-radius: 3px; background: var(--fill); flex-shrink: 0; }
-.cal-lv0 { background: #EAEFF2; }
-.cal-lv1 { background: var(--accent-30); }
-.cal-lv2 { background: var(--accent-60); }
-.cal-lv3 { background: var(--accent); }
-.cal-lv4 { background: var(--accent-deep); }
+.cal-lv1 { background: #EAEFF2; }
+.cal-lv2 { background: var(--accent-30); }
+.cal-lv3 { background: var(--accent-60); }
+.cal-lv4 { background: var(--accent); }
+.cal-lv5 { background: var(--accent-deep); }
 .cal-future { background: transparent; }
 .cal-legend { display: flex; align-items: center; gap: 4px; margin-top: 10px;
   font-size: 10px; color: var(--muted); }
