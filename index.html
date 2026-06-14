@@ -32,6 +32,7 @@ window.addEventListener("error", function(ev){
 </script>
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef, useMemo, useCallback, Fragment } = React;
+const HEADER_ICON = "data:image/png;base64,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";
 
 /* ============================================================================
    日本語単語帳  —  Japanese Vocabulary Trainer
@@ -147,7 +148,7 @@ function exampleSpeech(ex) {
 
    ▼▼▼ 배포 시 여기에 본인 Worker 주소를 넣으세요 ▼▼▼
    예: const PROXY_URL = "https://jp-vocab.your-name.workers.dev"; */
-const PROXY_URL = "https://jp-vocab.kmy9631.workers.dev"; // Cloudflare Worker 프록시 (자동 검색·예문)
+const PROXY_URL = "https://jp-vocab-proxy.vercel.app/api/claude"; // Vercel 서버리스 프록시 (자동 검색·예문)
 
 async function askClaude(prompt) {
   if (PROXY_URL) {
@@ -444,6 +445,13 @@ const Icon = {
         fill={p.filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
     </svg>
   ),
+  Quiz: (p) => (
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" {...p}>
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+      <path d="M9.2 9.3a2.8 2.8 0 0 1 5.4 1c0 1.8-2.6 2-2.6 3.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="12" cy="17" r="1.1" fill="currentColor" />
+    </svg>
+  ),
 };
 
 /* 후리가나 토큰 렌더링: showFuri면 한자(t)에 (r) 괄호 읽기 부여 */
@@ -482,6 +490,9 @@ function FlashCard({ card, isNew, voiceRef, onToggleStar, starred }) {
   const cleanWord = card.word.split(/[／/・↔≠\s(]/)[0];
   const meaningVisible = showMeaning && !hideAll;
   const furiVisible = showFuri && !hideAll;
+  // 단어가 한자어가 아니어도 예문에 한자가 있으면 후리가나 토글 활성화
+  const exHasFuri = !!(ex.tokens && ex.tokens.some((t) => t.r));
+  const furiAvailable = card.hasKanji || exHasFuri;
 
   return (
     <div className="card">
@@ -563,7 +574,7 @@ function FlashCard({ card, isNew, voiceRef, onToggleStar, starred }) {
         <button
           className={"ctrl-toggle" + (showFuri && !hideAll ? " ctrl-on" : "")}
           onClick={() => { setHideAll(false); setShowFuri((v) => hideAll ? true : !v); }}
-          disabled={!card.hasKanji}
+          disabled={!furiAvailable}
         >
           히라가나
         </button>
@@ -605,6 +616,28 @@ function StudyView({ cards, setCards, voiceRef }) {
 
   const introducedToday = cards.filter((c) => c.introducedOn === todayStr()).length;
 
+  // 좌우 스와이프: 왼쪽=다시 학습, 오른쪽=알고있음
+  const swipe = useRef({ x: 0, y: 0, active: false });
+  const [drag, setDrag] = useState(0);
+  const onTouchStart = (e) => {
+    const t = e.touches[0];
+    swipe.current = { x: t.clientX, y: t.clientY, active: true };
+  };
+  const onTouchMove = (e) => {
+    if (!swipe.current.active) return;
+    const t = e.touches[0];
+    const dx = t.clientX - swipe.current.x;
+    const dy = t.clientY - swipe.current.y;
+    if (Math.abs(dx) > Math.abs(dy)) setDrag(dx);
+  };
+  const onTouchEnd = () => {
+    const dx = drag;
+    swipe.current.active = false;
+    setDrag(0);
+    if (dx <= -80) grade(false);
+    else if (dx >= 80) grade(true);
+  };
+
   if (!current) {
     return (
       <div className="empty-state">
@@ -632,13 +665,26 @@ function StudyView({ cards, setCards, voiceRef }) {
         </span>
       </div>
 
-      <FlashCard
-        card={current}
-        isNew={!current.introducedOn}
-        starred={!!current.starred}
-        voiceRef={voiceRef}
-        onToggleStar={toggleStar}
-      />
+      <div
+        className="swipe-wrap"
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        style={{
+          transform: `translateX(${drag}px) rotate(${drag * 0.02}deg)`,
+          transition: drag === 0 ? "transform .25s cubic-bezier(.2,.8,.2,1)" : "none",
+        }}
+      >
+        {drag <= -40 && <div className="swipe-tag swipe-again">다시 학습</div>}
+        {drag >= 40 && <div className="swipe-tag swipe-known">알고있음</div>}
+        <FlashCard
+          card={current}
+          isNew={!current.introducedOn}
+          starred={!!current.starred}
+          voiceRef={voiceRef}
+          onToggleStar={toggleStar}
+        />
+      </div>
 
       {/* 채점 버튼: 카드 밖(회색 배경) */}
       <div className="grade-row">
@@ -828,7 +874,7 @@ function statusLabel(c) {
   return { text: `학습 ${c.seen}회`, cls: "tag-seen" };
 }
 
-function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, voiceRef }) {
+function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, onDelete, voiceRef }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(null);
 
@@ -888,7 +934,12 @@ function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, voiceR
           <span className={"tag " + statusLabel(card).cls}>{statusLabel(card).text}</span>
           <div className="modal-head-right">
             {!editing && (
-              <button className="modal-edit" onClick={() => setEditing(true)}>수정</button>
+              <>
+                <button className="modal-edit" onClick={() => setEditing(true)}>수정</button>
+                <button className="modal-delete-btn" onClick={() => {
+                  if (confirm("이 단어를 삭제할까요? 되돌릴 수 없어요.")) onDelete(card.id);
+                }}>삭제</button>
+              </>
             )}
             <button className="modal-close" onClick={onClose} aria-label="닫기">✕</button>
           </div>
@@ -1016,8 +1067,7 @@ function ListView({ cards, setCards, voiceRef }) {
   const unsuspend = (id) => {
     setCards((prev) => prev.map((c) => (c.id === id ? { ...c, suspended: false } : c)));
   };
-  const saveEdit = (id, fields) => {
-    setCards((prev) => prev.map((c) => {
+  const saveEdit = (id, fields) => {    setCards((prev) => prev.map((c) => {
       if (c.id !== id) return c;
       const word = fields.word.trim() || c.word;
       const exJa = (fields.exJa || "").trim();
@@ -1035,6 +1085,11 @@ function ListView({ cards, setCards, voiceRef }) {
         ex,
       };
     }));
+  };
+
+  const deleteCard = (id) => {
+    setCards((prev) => prev.filter((c) => c.id !== id));
+    setOpenId(null);
   };
 
   const openCard = cards.find((c) => c.id === openId) || null;
@@ -1068,6 +1123,7 @@ function ListView({ cards, setCards, voiceRef }) {
         onSuspend={suspend}
         onUnsuspend={unsuspend}
         onSave={saveEdit}
+        onDelete={deleteCard}
         voiceRef={voiceRef}
       />
     </div>
@@ -1082,7 +1138,107 @@ function fmtDuration(totalSec) {
   return `${m}분`;
 }
 
-function StatsView({ cards, timeLog }) {
+/* ===================== 퀴즈 뷰 ===================== */
+function pickN(arr, n, excludeId) {
+  const pool = arr.filter((c) => c.id !== excludeId);
+  const out = [];
+  const used = new Set();
+  while (out.length < n && used.size < pool.length) {
+    const i = Math.floor(Math.random() * pool.length);
+    if (used.has(i)) continue;
+    used.add(i);
+    out.push(pool[i]);
+  }
+  return out;
+}
+
+function QuizView({ cards }) {
+  const [mode, setMode] = useState("meaning"); // meaning=뜻맞추기, word=단어맞추기
+  const [round, setRound] = useState(0);
+  const [picked, setPicked] = useState(null); // 선택한 인덱스
+  const [score, setScore] = useState({ correct: 0, total: 0 });
+
+  // 출제 대상: 예문/뜻이 있는 카드
+  const pool = useMemo(() => cards.filter((c) => c.word && c.meaning), [cards]);
+
+  const quiz = useMemo(() => {
+    if (pool.length < 4) return null;
+    const answer = pool[Math.floor(Math.random() * pool.length)];
+    const distractors = pickN(pool, 3, answer.id);
+    const options = seededShuffle([answer, ...distractors], round + 1);
+    return { answer, options };
+  }, [round, pool]);
+
+  if (pool.length < 4) {
+    return (
+      <div className="quiz">
+        <h2 className="view-title">퀴즈</h2>
+        <div className="quiz-empty">단어가 4개 이상 등록되면 퀴즈를 풀 수 있어요.</div>
+      </div>
+    );
+  }
+
+  const askWord = mode === "word"; // 단어맞추기: 뜻 보여주고 단어 고르기
+  const prompt = askWord ? quiz.answer.meaning : quiz.answer.word;
+  const promptSub = askWord ? "" : (quiz.answer.hasKanji ? quiz.answer.reading : "");
+
+  const choose = (i) => {
+    if (picked !== null) return;
+    setPicked(i);
+    const isRight = quiz.options[i].id === quiz.answer.id;
+    setScore((s) => ({ correct: s.correct + (isRight ? 1 : 0), total: s.total + 1 }));
+  };
+  const next = () => { setPicked(null); setRound((r) => r + 1); };
+
+  const optLabel = (c) => (askWord ? c.word : c.meaning);
+
+  return (
+    <div className="quiz">
+      <h2 className="view-title">퀴즈</h2>
+
+      <div className="quiz-modes">
+        <button className={"quiz-mode" + (mode === "meaning" ? " quiz-mode-on" : "")}
+          onClick={() => { setMode("meaning"); setPicked(null); setRound((r) => r + 1); }}>
+          뜻 맞추기
+        </button>
+        <button className={"quiz-mode" + (mode === "word" ? " quiz-mode-on" : "")}
+          onClick={() => { setMode("word"); setPicked(null); setRound((r) => r + 1); }}>
+          단어 맞추기
+        </button>
+      </div>
+
+      <div className="quiz-score">{score.correct} / {score.total}</div>
+
+      <div className="quiz-prompt">
+        <div className="quiz-prompt-main">{prompt}</div>
+        {promptSub && <div className="quiz-prompt-sub">{promptSub}</div>}
+      </div>
+
+      <div className="quiz-options">
+        {quiz.options.map((c, i) => {
+          const isAnswer = c.id === quiz.answer.id;
+          let cls = "quiz-opt";
+          if (picked !== null) {
+            if (isAnswer) cls += " quiz-opt-correct";
+            else if (i === picked) cls += " quiz-opt-wrong";
+            else cls += " quiz-opt-dim";
+          }
+          return (
+            <button key={c.id} className={cls} onClick={() => choose(i)} disabled={picked !== null}>
+              {optLabel(c)}
+            </button>
+          );
+        })}
+      </div>
+
+      {picked !== null && (
+        <button className="quiz-next" onClick={next}>다음 문제</button>
+      )}
+    </div>
+  );
+}
+
+function StatsView({ cards, timeLog, setCards, setTimeLog }) {
   const stats = useMemo(() => {
     // 학습 횟수 합계 / 학습한 단어 수 / 학습한 날짜 집합
     let totalReviews = 0;
@@ -1169,6 +1325,72 @@ function StatsView({ cards, timeLog }) {
           ))}
         </div>
       </div>
+
+      <BackupBox cards={cards} timeLog={timeLog} setCards={setCards} setTimeLog={setTimeLog} />
+    </div>
+  );
+}
+
+/* 데이터 백업/복원: 기기 로컬 JSON 파일로 내보내고 불러오기 */
+function BackupBox({ cards, timeLog, setCards, setTimeLog }) {
+  const fileRef = useRef(null);
+  const [msg, setMsg] = useState("");
+
+  const exportData = () => {
+    try {
+      const data = { version: 1, exportedAt: new Date().toISOString(), cards, timeLog };
+      const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `jp-vocab-backup-${todayStr()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setMsg("백업 파일을 저장했어요.");
+    } catch (e) {
+      setMsg("내보내기 실패: " + (e && e.message ? e.message : e));
+    }
+  };
+
+  const importData = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        if (!Array.isArray(data.cards)) throw new Error("형식이 올바르지 않아요");
+        if (!confirm(`단어 ${data.cards.length}개를 불러옵니다. 현재 데이터를 덮어쓸까요?`)) return;
+        setCards(data.cards);
+        saveCards(data.cards);
+        if (data.timeLog && typeof data.timeLog === "object") {
+          setTimeLog(data.timeLog);
+          saveTimeLog(data.timeLog);
+        }
+        setMsg(`불러오기 완료: 단어 ${data.cards.length}개`);
+      } catch (err) {
+        setMsg("불러오기 실패: " + (err && err.message ? err.message : err));
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
+  return (
+    <div className="backup-box">
+      <div className="backup-head">데이터 백업</div>
+      <div className="backup-desc">
+        학습 기록은 이 기기에만 저장돼요. 기기를 바꾸거나 초기화에 대비해 파일로 백업해 두세요.
+      </div>
+      <div className="backup-btns">
+        <button className="backup-btn" onClick={exportData}>내보내기</button>
+        <button className="backup-btn" onClick={() => fileRef.current && fileRef.current.click()}>불러오기</button>
+        <input ref={fileRef} type="file" accept="application/json,.json"
+          onChange={importData} style={{ display: "none" }} />
+      </div>
+      {msg && <div className="backup-msg">{msg}</div>}
     </div>
   );
 }
@@ -1303,7 +1525,10 @@ function App() {
       <style>{CSS}</style>
 
       <header className="topbar">
-        <div className="topbar-title">일본어 단어장</div>
+        <div className="topbar-inner">
+          <div className="topbar-title">일본어 단어장</div>
+          <img className="topbar-icon" src={HEADER_ICON} alt="" />
+        </div>
       </header>
 
       <div
@@ -1321,7 +1546,8 @@ function App() {
           {tab === "study" && <StudyView cards={cards} setCards={setCards} voiceRef={voiceRef} />}
           {tab === "add" && <AddView cards={cards} setCards={setCards} voiceRef={voiceRef} />}
           {tab === "list" && <ListView cards={cards} setCards={setCards} voiceRef={voiceRef} />}
-          {tab === "stats" && <StatsView cards={cards} timeLog={timeLog} />}
+          {tab === "quiz" && <QuizView cards={cards} />}
+          {tab === "stats" && <StatsView cards={cards} timeLog={timeLog} setCards={setCards} setTimeLog={setTimeLog} />}
         </main>
       </div>
 
@@ -1334,6 +1560,9 @@ function App() {
         </button>
         <button className={"tab" + (tab === "list" ? " tab-on" : "")} onClick={() => setTab("list")}>
           <Icon.List /><span>목록</span>
+        </button>
+        <button className={"tab" + (tab === "quiz" ? " tab-on" : "")} onClick={() => setTab("quiz")}>
+          <Icon.Quiz /><span>퀴즈</span>
         </button>
         <button className={"tab" + (tab === "stats" ? " tab-on" : "")} onClick={() => setTab("stats")}>
           <Icon.Stats /><span>통계</span>
@@ -1357,6 +1586,7 @@ const CSS = `
   --fill: #e9e9eb;
   /* 포인트 컬러 (아이콘 파랑 #008CD7) 3단계 */
   --accent: #008CD7;          /* 100% */
+  --accent-deep: #0067A0;     /* 진한 파랑 텍스트용 */
   --accent-60: #66BAE7;       /* 흰 배경 위 60% */
   --accent-30: #B3DDF3;       /* 흰 배경 위 30% */
   --accent-soft: #E6F4FB;     /* 아주 옅은 배경용 */
@@ -1366,8 +1596,11 @@ const CSS = `
   background: var(--bg); color: var(--ink);
   overflow: hidden;
 }
-.topbar { padding: 14px 20px 10px; background: var(--bg); }
+.topbar { padding: 14px 16px 10px; background: var(--bg); }
+.topbar-inner { max-width: 480px; margin: 0 auto; display: flex;
+  align-items: center; justify-content: space-between; }
 .topbar-title { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
+.topbar-icon { height: 34px; width: auto; display: block; }
 
 .scroll-area { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .content { padding: 8px 16px 28px; }
@@ -1461,7 +1694,52 @@ const CSS = `
   font-size: 16px; font-weight: 700; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   box-shadow: 0 1px 2px rgba(0,0,0,.04); }
-.grade-again { background: var(--accent-30); color: var(--accent); }
+.grade-again { background: var(--accent-soft); color: var(--accent-deep); }
+.swipe-wrap { position: relative; touch-action: pan-y; }
+.swipe-tag { position: absolute; top: 18px; z-index: 5; padding: 7px 16px;
+  border-radius: 980px; font-size: 15px; font-weight: 700; pointer-events: none; }
+.swipe-again { left: 18px; background: var(--accent-soft); color: var(--accent-deep); }
+.swipe-known { right: 18px; background: var(--accent); color: #fff; }
+
+/* 퀴즈 */
+.quiz { max-width: 480px; margin: 0 auto; }
+.quiz-empty { color: var(--ink-2); font-size: 15px; text-align: center;
+  padding: 18vh 20px 0; line-height: 1.6; }
+.quiz-modes { display: flex; gap: 8px; margin: 6px 0 18px; }
+.quiz-mode { flex: 1; height: 44px; border-radius: 12px; border: 1px solid var(--line);
+  background: transparent; color: var(--ink-2); font-size: 15px; font-weight: 600; cursor: pointer; }
+.quiz-mode-on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.quiz-score { text-align: center; font-size: 14px; color: var(--muted);
+  font-weight: 600; margin-bottom: 14px; }
+.quiz-prompt { background: var(--surface); border-radius: 18px; padding: 32px 20px;
+  text-align: center; margin-bottom: 18px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.05); }
+.quiz-prompt-main { font-size: 28px; font-weight: 700; color: var(--ink); line-height: 1.3;
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; }
+.quiz-prompt-sub { font-size: 15px; color: var(--muted); margin-top: 8px; letter-spacing: 1px; }
+.quiz-options { display: flex; flex-direction: column; gap: 10px; }
+.quiz-opt { width: 100%; min-height: 56px; padding: 14px 18px; border-radius: 14px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  font-size: 17px; font-weight: 500; cursor: pointer; text-align: left; line-height: 1.4;
+  transition: background .15s, border-color .15s, color .15s; }
+.quiz-opt:active { background: var(--fill); }
+.quiz-opt-correct { background: var(--accent); border-color: var(--accent); color: #fff; }
+.quiz-opt-wrong { background: var(--fill); border-color: var(--line); color: var(--muted); }
+.quiz-opt-dim { opacity: .5; }
+.quiz-opt:disabled { cursor: default; }
+.quiz-next { width: 100%; height: 52px; margin-top: 16px; border-radius: 14px;
+  border: none; background: var(--accent); color: #fff; font-size: 17px; font-weight: 600; cursor: pointer; }
+
+/* 백업 */
+.backup-box { background: var(--surface); border-radius: 18px; padding: 18px;
+  margin-top: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.backup-head { font-size: 16px; font-weight: 700; color: var(--ink); margin-bottom: 6px; }
+.backup-desc { font-size: 13px; color: var(--muted); line-height: 1.6; margin-bottom: 14px; }
+.backup-btns { display: flex; gap: 10px; }
+.backup-btn { flex: 1; height: 46px; border-radius: 12px; border: 1px solid var(--accent);
+  background: var(--accent-soft); color: var(--accent); font-size: 15px; font-weight: 600; cursor: pointer; }
+.backup-btn:active { background: var(--accent-30); }
+.backup-msg { margin-top: 12px; font-size: 13px; color: var(--accent-deep); }
 .grade-known { background: var(--accent); color: #fff; }
 .grade:active { transform: scale(0.98); }
 
@@ -1530,13 +1808,18 @@ const CSS = `
 /* 상세 모달 */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35);
   display: flex; align-items: center; justify-content: center; z-index: 50;
-  padding: 20px; animation: fade .15s ease; }
+  padding: 16px; animation: fade .15s ease; }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 .modal { background: var(--surface); width: 100%; max-width: 440px;
-  border-radius: 22px; padding: 14px 18px 20px;
-  animation: pop .2s cubic-bezier(.2,.8,.2,1); max-height: 86vh; overflow-y: auto; }
+  border-radius: 22px; padding: 0 18px 18px;
+  animation: pop .2s cubic-bezier(.2,.8,.2,1);
+  max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px);
+  display: flex; flex-direction: column; overflow: hidden; }
 @keyframes pop { from { transform: scale(.96); opacity: .6; } to { transform: scale(1); opacity: 1; } }
-.modal-head { display: flex; align-items: center; justify-content: space-between; }
+.modal-head { display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; background: var(--surface); padding: 14px 0 8px;
+  z-index: 2; flex-shrink: 0; }
+.modal-body, .modal-edit-body { overflow-y: auto; -webkit-overflow-scrolling: touch; }
 .modal-close { border: none; background: var(--fill); color: var(--ink-2);
   width: 32px; height: 32px; border-radius: 50%; font-size: 15px; cursor: pointer; }
 .modal-body { display: flex; flex-direction: column; align-items: center;
@@ -1566,6 +1849,9 @@ const CSS = `
 .modal-head-right { display: flex; align-items: center; gap: 8px; }
 .modal-edit { border: 1px solid var(--accent); background: var(--accent-soft);
   color: var(--accent); height: 32px; padding: 0 14px; border-radius: 980px;
+  font-size: 14px; font-weight: 600; cursor: pointer; }
+.modal-delete-btn { border: 1px solid var(--line); background: var(--fill);
+  color: var(--ink-2); height: 32px; padding: 0 14px; border-radius: 980px;
   font-size: 14px; font-weight: 600; cursor: pointer; }
 .modal-edit-body { display: flex; flex-direction: column; padding: 6px 0 2px; }
 .edit-label { font-size: 12px; font-weight: 600; color: var(--ink-2); margin: 12px 4px 5px; }
