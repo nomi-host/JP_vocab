@@ -623,79 +623,68 @@ function FlashCard({ card, isNew, voiceRef, onToggleStar, starred }) {
 }
 
 /* ===================== 학습 뷰 ===================== */
-function StudyView({ cards, setCards, voiceRef, timeLog }) {
+function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) {
   const cardsRef = useRef(cards);
   useEffect(() => { cardsRef.current = cards; }, [cards]);
 
-  // 세션 큐: 카드 id 배열. 세션 시작 시 1회 구성하고, 채점에 따라 직접 갱신.
-  const [session, setSession] = useState(() => buildQueue(cards).map((c) => c.id));
-  const [pos, setPos] = useState(0);
-  const [doneCount, setDoneCount] = useState(0); // 이번 세션 '알고있음' 처리 수
-  const [sessionTotal, setSessionTotal] = useState(() => buildQueue(cards).length);
-  const [showFinish, setShowFinish] = useState(false);
-  const [finishImg, setFinishImg] = useState(0);
-  const [extraLimit, setExtraLimit] = useState(NEW_PER_DAY);
+  // 세션이 없으면 새로 구성(탭 전환 시엔 상위 상태가 유지되어 재구성 안 됨)
+  useEffect(() => {
+    if (!session) {
+      const q = buildQueue(cardsRef.current).map((c) => c.id);
+      setSession({ queue: q, pos: 0, doneCount: 0, total: q.length, extraLimit: NEW_PER_DAY, done: false, dismissed: false });
+    }
+  }, [session, setSession]);
 
-  const currentId = session[pos];
+  const [finishImg, setFinishImg] = useState(0);
+  const [seconds, setSeconds] = useState(0);
+  const swipe = useRef({ x: 0, y: 0, active: false });
+  const [drag, setDrag] = useState(0);
+  const [leaving, setLeaving] = useState(0);
+
+  const s = session || { queue: [], pos: 0, doneCount: 0, total: 0, extraLimit: NEW_PER_DAY, done: false, dismissed: false };
+  const currentId = s.queue[s.pos];
   const current = cards.find((c) => c.id === currentId) || null;
 
-  // 세션 학습 시간(초)
-  const [seconds, setSeconds] = useState(0);
   useEffect(() => {
     if (!current) return;
-    const t = setInterval(() => setSeconds((s) => s + 1), 1000);
+    const t = setInterval(() => setSeconds((x) => x + 1), 1000);
     return () => clearInterval(t);
   }, [current]);
 
-  const swipe = useRef({ x: 0, y: 0, active: false });
-  const [drag, setDrag] = useState(0);
-  const [leaving, setLeaving] = useState(0); // 카드 날아가는 방향(-1/1/0)
+  // 완료 도달 시 1회만 팝업 이미지 선택
+  useEffect(() => {
+    if (session && session.pos >= session.queue.length && session.queue.length > 0 && !session.done) {
+      setFinishImg(Math.floor(Math.random() * FINISH_IMAGES.length));
+      setSession((prev) => prev ? { ...prev, done: true } : prev);
+    }
+  }, [session]);
 
   const advance = (known) => {
-    // 카드 채점 반영
-    setCards((prev) =>
-      prev.map((c) => (c.id === currentId ? gradeCard(c, known) : c))
-    );
-    setSession((prevSession) => {
-      const next = prevSession.slice();
+    setCards((prev) => prev.map((c) => (c.id === currentId ? gradeCard(c, known) : c)));
+    setSession((prev) => {
+      if (!prev) return prev;
+      const queue = prev.queue.slice();
       if (!known) {
-        // '다시 학습' → 현재 카드를 큐 뒤쪽(3~5칸 뒤)에 재삽입해 다시 노출
-        const insertAt = Math.min(next.length, pos + 4);
-        next.splice(insertAt, 0, currentId);
+        const insertAt = Math.min(queue.length, prev.pos + 4);
+        queue.splice(insertAt, 0, currentId);
       }
-      return next;
-    });
-    if (known) setDoneCount((n) => n + 1);
-
-    // 다음 위치로
-    setPos((p) => {
-      const np = p + 1;
-      return np;
+      return {
+        ...prev,
+        queue,
+        pos: prev.pos + 1,
+        doneCount: prev.doneCount + (known ? 1 : 0),
+      };
     });
   };
-
-  // 세션 종료 감지: pos가 큐 끝에 도달
-  useEffect(() => {
-    if (pos > 0 && pos >= session.length && !showFinish) {
-      setFinishImg(Math.floor(Math.random() * FINISH_IMAGES.length));
-      setShowFinish(true);
-    }
-  }, [pos, session.length]);
 
   const triggerGrade = (known) => {
     setLeaving(known ? 1 : -1);
-    setTimeout(() => {
-      setLeaving(0);
-      advance(known);
-    }, 180);
+    setTimeout(() => { setLeaving(0); advance(known); }, 180);
   };
-
   const grade = (known) => triggerGrade(known);
 
   const toggleStar = () => {
-    setCards((prev) =>
-      prev.map((c) => (c.id === currentId ? { ...c, starred: !c.starred } : c))
-    );
+    setCards((prev) => prev.map((c) => (c.id === currentId ? { ...c, starred: !c.starred } : c)));
   };
 
   const onTouchStart = (e) => {
@@ -724,20 +713,22 @@ function StudyView({ cards, setCards, voiceRef, timeLog }) {
 
   // 추가 학습: 신규 한도를 늘려 큐 재구성
   const startExtra = () => {
-    const more = extraLimit + NEW_PER_DAY;
-    setExtraLimit(more);
+    const more = (s.extraLimit || NEW_PER_DAY) + NEW_PER_DAY;
     const q = buildQueue(cardsRef.current, more).map((c) => c.id);
-    if (q.length === 0) { setShowFinish(false); return; }
-    setSession(q);
-    setSessionTotal(q.length);
-    setPos(0);
-    setDoneCount(0);
+    if (q.length === 0) {
+      setSession((prev) => prev ? { ...prev, done: true, dismissed: true } : prev);
+      return;
+    }
     setSeconds(0);
-    setShowFinish(false);
+    setSession({ queue: q, pos: 0, doneCount: 0, total: q.length, extraLimit: more, done: false, dismissed: false });
   };
 
-  // 완료 팝업
-  if (showFinish) {
+  const dismissFinish = () => {
+    setSession((prev) => prev ? { ...prev, dismissed: true } : prev);
+  };
+
+  // 완료 팝업 (아직 닫지 않았을 때만)
+  if (session && session.done && !session.dismissed) {
     const streak = calcStreak(timeLog);
     const totalSec = Object.values(timeLog || {}).reduce((a, b) => a + (b || 0), 0);
     const th = Math.floor(totalSec / 3600);
@@ -758,12 +749,13 @@ function StudyView({ cards, setCards, voiceRef, timeLog }) {
           </div>
           <img className="finish-img" src={FINISH_IMAGES[finishImg]} alt="" />
           <button className="finish-extra" onClick={startExtra}>추가 학습하기</button>
-          <button className="finish-close" onClick={() => setShowFinish(false)}>닫기</button>
+          <button className="finish-close" onClick={dismissFinish}>닫기</button>
         </div>
       </div>
     );
   }
 
+  // 카드 소진 + 팝업 닫은 뒤: 차분한 완료 화면(여기서 추가 학습 재개 가능)
   if (!current) {
     return (
       <div className="empty-state">
@@ -775,9 +767,8 @@ function StudyView({ cards, setCards, voiceRef, timeLog }) {
     );
   }
 
-  // 진행률: 이번 세션 완료(알고있음) 수 / 세션 목표
-  const total = Math.max(sessionTotal, doneCount);
-  const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+  const total = Math.max(s.total, s.doneCount);
+  const pct = total > 0 ? Math.round((s.doneCount / total) * 100) : 0;
 
   const dragOut = leaving !== 0;
   const tx = dragOut ? leaving * 500 : drag;
@@ -787,7 +778,7 @@ function StudyView({ cards, setCards, voiceRef, timeLog }) {
   return (
     <div className="study">
       <div className="study-head">
-        <span className="study-count">{doneCount}/{total}</span>
+        <span className="study-count">{s.doneCount}/{total}</span>
         <div className="study-bar">
           <div className="study-bar-fill" style={{ width: `${Math.max(pct, 3)}%` }}>
             <span className="study-bar-knob" />
@@ -1285,20 +1276,14 @@ function ListView({ cards, setCards, voiceRef }) {
       {refreshMsg && <div className="list-refresh-msg">{refreshMsg}</div>}
 
       <div className="list-chips">
-        {[
-          ["all", "전체"],
-          ["weak", `약점${counts.weak ? " " + counts.weak : ""}`],
-          ["fav", `즐겨찾기${counts.fav ? " " + counts.fav : ""}`],
-          ["new", "미학습"],
-          ["learning", "학습중"],
-          ["done", "완료"],
-        ].map(([k, label]) => (
-          <button key={k}
-            className={"list-chip" + (flt === k ? " on" : "")}
-            onClick={() => setFlt(k)}>
-            {label}
-          </button>
-        ))}
+        <button className={"list-chip" + (flt === "all" ? " on" : "")} onClick={() => setFlt("all")}>전체</button>
+        <button className={"list-chip" + (flt === "weak" ? " on" : "")} onClick={() => setFlt("weak")}>약점{counts.weak ? " " + counts.weak : ""}</button>
+        <button className={"list-chip list-chip-fav" + (flt === "fav" ? " on" : "")} onClick={() => setFlt("fav")}>
+          <Icon.Star filled={true} />{counts.fav ? " " + counts.fav : ""}
+        </button>
+        <button className={"list-chip" + (flt === "new" ? " on" : "")} onClick={() => setFlt("new")}>미학습</button>
+        <button className={"list-chip" + (flt === "learning" ? " on" : "")} onClick={() => setFlt("learning")}>학습중</button>
+        <button className={"list-chip" + (flt === "done" ? " on" : "")} onClick={() => setFlt("done")}>완료</button>
       </div>
 
       <div className="list-sort">
@@ -1406,19 +1391,47 @@ function quizSubjectPool(cards) {
   return { recent, rest };
 }
 
+// 한국어 뜻으로 품사 대략 분류: 동사/형용사(다로 끝남) vs 명사 vs 기타
+function posClass(meaning) {
+  if (!meaning) return "etc";
+  // 첫 번째 뜻만 보고 판단(쉼표/슬래시 앞)
+  const first = meaning.split(/[,/·]/)[0].trim();
+  if (/다$/.test(first)) return "verb";          // ~하다, ~되다, ~지다 등
+  if (/[은는한운]$|스럽다$|롭다$/.test(first)) return "adj";
+  if (/[을를](.*)?$/.test(first) && /다$/.test(first)) return "verb";
+  // 괄호 설명만 있는 조사/표현
+  if (/^[~\(]/.test(first)) return "expr";
+  return "noun";
+}
+
+// 정답과 같은 품사의 그럴듯한 오답 우선 선택, 부족하면 무작위로 채움
+function pickDistractors(all, answer, n) {
+  const targetPos = posClass(answer.meaning);
+  const sameClass = [];
+  const others = [];
+  for (const c of all) {
+    if (c.id === answer.id) continue;
+    if (posClass(c.meaning) === targetPos) sameClass.push(c);
+    else others.push(c);
+  }
+  const out = shuffleArr(sameClass).slice(0, n);
+  if (out.length < n) {
+    out.push(...shuffleArr(others).slice(0, n - out.length));
+  }
+  return out;
+}
+
 function buildQuizRound(cards, mode) {
   const all = cards.filter((c) => c.word && c.meaning);
   if (all.length < 4) return [];
   const { recent, rest } = quizSubjectPool(cards);
-  // 출제 단어: 최근 학습 우선, 부족분은 나머지 무작위
   let subjects = shuffleArr(recent).slice(0, QUIZ_LEN);
   if (subjects.length < QUIZ_LEN) {
     subjects = subjects.concat(shuffleArr(rest).slice(0, QUIZ_LEN - subjects.length));
   }
-  // 그래도 모자라면(전체가 적으면) 중복 허용해서 채움
   if (subjects.length === 0) return [];
   return subjects.map((answer) => {
-    const distractors = pickN(all, 3, answer.id);
+    const distractors = pickDistractors(all, answer, 3);
     const options = shuffleArr([answer, ...distractors]); // 정답 위치 진짜 무작위
     return { answerId: answer.id, options };
   });
@@ -1968,6 +1981,8 @@ function calcStreak(timeLog) {
 function App() {
   const [cards, setCards] = useState(loadCards);
   const [tab, setTab] = useState("study");
+  // 학습 세션 상태(탭 전환에도 유지). null이면 StudyView가 새 세션을 만든다.
+  const [studySession, setStudySession] = useState(null);
   const [version, setVersion] = useState(1);
   const [timeLog, setTimeLog] = useState(loadTimeLog);
   const voiceRef = useJaVoice();
@@ -2030,7 +2045,7 @@ function App() {
         </div>
 
         <main className="content">
-          {tab === "study" && <StudyView cards={cards} setCards={setCards} voiceRef={voiceRef} timeLog={timeLog} />}
+          {tab === "study" && <StudyView cards={cards} setCards={setCards} voiceRef={voiceRef} timeLog={timeLog} session={studySession} setSession={setStudySession} />}
           {tab === "add" && <AddView cards={cards} setCards={setCards} voiceRef={voiceRef} />}
           {tab === "list" && <ListView cards={cards} setCards={setCards} voiceRef={voiceRef} />}
           {tab === "quiz" && <QuizView cards={cards} setCards={setCards} />}
@@ -2212,10 +2227,10 @@ const CSS = `
   font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; }
 .quiz-prompt-sub { font-size: 15px; color: var(--muted); margin-top: 8px; letter-spacing: 1px; }
 .quiz-options { display: flex; flex-direction: column; gap: 10px; }
-.quiz-opt { width: 100%; min-height: 56px; padding: 12px 18px; border-radius: 14px;
+.quiz-opt { width: 100%; min-height: 56px; padding: 14px 18px; border-radius: 14px;
   border: 1px solid var(--line); background: var(--surface); color: var(--ink);
-  font-size: 17px; font-weight: 500; cursor: pointer; text-align: left; line-height: 1.4;
-  display: flex; flex-direction: column; gap: 2px;
+  font-size: 17px; font-weight: 500; cursor: pointer; text-align: left; line-height: 1.35;
+  display: flex; flex-direction: column; justify-content: center; gap: 3px;
   transition: background .15s, border-color .15s, color .15s; }
 .quiz-opt:active { background: var(--fill); }
 .quiz-opt-main { display: block; }
@@ -2243,10 +2258,14 @@ const CSS = `
   border: 1px solid var(--line); background: var(--fill); color: var(--ink-2);
   font-size: 14px; font-weight: 600; cursor: pointer; }
 .list-refresh-msg { font-size: 13px; color: var(--accent-deep); margin: -4px 0 12px; }
-.list-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.list-chips { display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 10px;
+  overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .list-chip { height: 32px; padding: 0 12px; border-radius: 980px; border: 1px solid var(--line);
-  background: var(--surface); color: var(--ink-2); font-size: 13px; font-weight: 600; cursor: pointer; }
+  background: var(--surface); color: var(--ink-2); font-size: 13px; font-weight: 600; cursor: pointer;
+  flex-shrink: 0; white-space: nowrap; }
 .list-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.list-chip-fav { display: inline-flex; align-items: center; gap: 2px; }
+.list-chip-fav svg { width: 14px; height: 14px; }
 .list-sort { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
 .list-sort-label { font-size: 12px; color: var(--muted); margin-right: 2px; }
 .list-sort-btn { height: 28px; padding: 0 10px; border-radius: 8px; border: none;
