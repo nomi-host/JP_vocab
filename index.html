@@ -828,62 +828,160 @@ function statusLabel(c) {
   return { text: `학습 ${c.seen}회`, cls: "tag-seen" };
 }
 
-function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, voiceRef }) {
-  if (!card) return null;
+function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, voiceRef }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState(null);
+
+  useEffect(() => {
+    // 카드가 바뀌면 편집 상태 초기화
+    setEditing(false);
+    if (card) {
+      const ex = card.ex || {};
+      const furiMap = tokensToFuri(ex.tokens || []);
+      const furiText = Object.entries(furiMap).map(([k, v]) => `${k}=${v}`).join("\n");
+      setForm({
+        word: card.word,
+        reading: card.reading || "",
+        meaning: card.meaning,
+        exJa: ex.ja || "",
+        exKo: ex.ko || "",
+        furiText,
+      });
+    }
+  }, [card && card.id]);
+
+  if (!card || !form) return null;
   const ex = getExample(card);
   const clean = card.word.split(/[／/・↔≠\s(]/)[0];
+
+  // 편집 중 후리가나 텍스트("漢字=よみ" 줄들) → 맵
+  const parseFuri = (text) => {
+    const m = {};
+    (text || "").split("\n").forEach((line) => {
+      const i = line.indexOf("=");
+      if (i > 0) {
+        const k = line.slice(0, i).trim();
+        const v = line.slice(i + 1).trim();
+        if (k && v) m[k] = v;
+      }
+    });
+    return m;
+  };
+  const previewTokens = form.exJa ? tokenizeJa(form.exJa, parseFuri(form.furiText)) : [];
+
+  const doSave = () => {
+    onSave(card.id, {
+      word: form.word,
+      reading: form.reading,
+      meaning: form.meaning,
+      exJa: form.exJa,
+      exKo: form.exKo,
+      furi: parseFuri(form.furiText),
+    });
+    setEditing(false);
+  };
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <span className={"tag " + statusLabel(card).cls}>{statusLabel(card).text}</span>
-          <button className="modal-close" onClick={onClose} aria-label="닫기">✕</button>
-        </div>
-
-        <div className="modal-body">
-          {card.hasKanji && card.reading && (
-            <div className="modal-furi">{card.reading}</div>
-          )}
-          <button className="modal-word" onClick={() => speak(wordSpeech(card), voiceRef)}>
-            {card.word}
-          </button>
-          <div className="modal-meaning">{card.meaning}</div>
-
-          <div className="modal-divider" />
-
-          {ex.tokens && ex.tokens.length > 0 ? (
-            <button className="modal-example" onClick={() => speak(exampleSpeech(ex), voiceRef)}>
-              <span className="modal-ex-ja">
-                <FuriganaText tokens={ex.tokens} showFuri={true} />
-              </span>
-              <span className="modal-ex-ko">{ex.ko}</span>
-            </button>
-          ) : (
-            <div className="modal-noex">등록된 예문이 없습니다.</div>
-          )}
-
-          <div className="modal-stats">
-            <span>학습 횟수 <b>{card.seen}회</b></span>
-            <span>
-              상태 <b>{card.suspended ? "다시 학습 안 함" : card.introducedOn ? "학습 중" : "미학습"}</b>
-            </span>
+          <div className="modal-head-right">
+            {!editing && (
+              <button className="modal-edit" onClick={() => setEditing(true)}>수정</button>
+            )}
+            <button className="modal-close" onClick={onClose} aria-label="닫기">✕</button>
           </div>
         </div>
 
-        <div className="modal-actions">
-          <button className="modal-naver" onClick={() => openNaver(clean)}>
-            네이버 사전
-          </button>
-          {card.suspended ? (
-            <button className="modal-resume" onClick={() => onUnsuspend(card.id)}>
-              다시 학습하기
-            </button>
-          ) : (
-            <button className="modal-suspend" onClick={() => onSuspend(card.id)}>
-              다시 학습하지 않기
-            </button>
-          )}
-        </div>
+        {!editing ? (
+          <>
+            <div className="modal-body">
+              {card.hasKanji && card.reading && (
+                <div className="modal-furi">{card.reading}</div>
+              )}
+              <button className="modal-word" onClick={() => speak(wordSpeech(card), voiceRef)}>
+                {card.word}
+              </button>
+              <div className="modal-meaning">{card.meaning}</div>
+
+              <div className="modal-divider" />
+
+              {ex.tokens && ex.tokens.length > 0 ? (
+                <button className="modal-example" onClick={() => speak(exampleSpeech(ex), voiceRef)}>
+                  <span className="modal-ex-ja">
+                    <FuriganaText tokens={ex.tokens} showFuri={true} />
+                  </span>
+                  <span className="modal-ex-ko">{ex.ko}</span>
+                </button>
+              ) : (
+                <div className="modal-noex">등록된 예문이 없습니다.</div>
+              )}
+
+              <div className="modal-stats">
+                <span>학습 횟수 <b>{card.seen}회</b></span>
+                <span>
+                  상태 <b>{card.suspended ? "다시 학습 안 함" : card.introducedOn ? "학습 중" : "미학습"}</b>
+                </span>
+              </div>
+            </div>
+
+            <div className="modal-actions">
+              <button className="modal-naver" onClick={() => openNaver(clean)}>
+                네이버 사전
+              </button>
+              {card.suspended ? (
+                <button className="modal-resume" onClick={() => onUnsuspend(card.id)}>
+                  다시 학습하기
+                </button>
+              ) : (
+                <button className="modal-suspend" onClick={() => onSuspend(card.id)}>
+                  다시 학습하지 않기
+                </button>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="modal-edit-body">
+            <label className="edit-label">단어</label>
+            <input className="input" value={form.word}
+              onChange={(e) => setForm({ ...form, word: e.target.value })} />
+
+            <label className="edit-label">요미가나 (한자어만)</label>
+            <input className="input" value={form.reading}
+              placeholder={hasKanji(form.word) ? "ひらがな" : "한자 없음 — 불필요"}
+              onChange={(e) => setForm({ ...form, reading: e.target.value })} />
+
+            <label className="edit-label">뜻</label>
+            <textarea className="input textarea" value={form.meaning}
+              onChange={(e) => setForm({ ...form, meaning: e.target.value })} />
+
+            <label className="edit-label">예문 (일본어)</label>
+            <textarea className="input textarea" value={form.exJa}
+              onChange={(e) => setForm({ ...form, exJa: e.target.value })} />
+
+            <label className="edit-label">예문 번역 (한국어)</label>
+            <textarea className="input textarea" value={form.exKo}
+              onChange={(e) => setForm({ ...form, exKo: e.target.value })} />
+
+            <label className="edit-label">후리가나 (한 줄에 "漢字=よみ")</label>
+            <textarea className="input textarea furi-edit" value={form.furiText}
+              placeholder={"例)\n税務署=ぜいむしょ\n控除=こうじょ"}
+              onChange={(e) => setForm({ ...form, furiText: e.target.value })} />
+
+            {form.exJa && (
+              <div className="edit-preview">
+                <span className="edit-preview-label">미리보기</span>
+                <FuriganaText tokens={previewTokens} showFuri={true} />
+              </div>
+            )}
+
+            <div className="modal-actions">
+              <button className="modal-resume" onClick={() => setEditing(false)}>취소</button>
+              <button className="modal-suspend modal-save" onClick={doSave}>저장</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -918,6 +1016,26 @@ function ListView({ cards, setCards, voiceRef }) {
   const unsuspend = (id) => {
     setCards((prev) => prev.map((c) => (c.id === id ? { ...c, suspended: false } : c)));
   };
+  const saveEdit = (id, fields) => {
+    setCards((prev) => prev.map((c) => {
+      if (c.id !== id) return c;
+      const word = fields.word.trim() || c.word;
+      const exJa = (fields.exJa || "").trim();
+      // 후리가나 맵: 기존 토큰 + 편집창의 reading을 합쳐 재토큰화
+      const furi = { ...tokensToFuri(c.ex && c.ex.tokens ? c.ex.tokens : []), ...(fields.furi || {}) };
+      const ex = exJa
+        ? { ja: exJa, ko: (fields.exKo || "").trim(), tokens: tokenizeJa(exJa, furi) }
+        : null;
+      return {
+        ...c,
+        word,
+        reading: (fields.reading || "").trim(),
+        meaning: (fields.meaning || "").trim() || c.meaning,
+        hasKanji: hasKanji(word),
+        ex,
+      };
+    }));
+  };
 
   const openCard = cards.find((c) => c.id === openId) || null;
 
@@ -949,6 +1067,7 @@ function ListView({ cards, setCards, voiceRef }) {
         onClose={() => setOpenId(null)}
         onSuspend={suspend}
         onUnsuspend={unsuspend}
+        onSave={saveEdit}
         voiceRef={voiceRef}
       />
     </div>
@@ -1277,9 +1396,9 @@ const CSS = `
   background: var(--fill); color: var(--ink-2); border-radius: 980px;
   padding: 6px 12px; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
-.card { background: var(--surface); border-radius: 22px; padding: 16px 16px 18px;
+.card { background: var(--surface); border-radius: 22px; padding: 12px 16px 16px;
   box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 10px 30px rgba(0,0,0,.06);
-  display: flex; flex-direction: column; min-height: 64vh; }
+  display: flex; flex-direction: column; min-height: 52vh; }
 
 /* 상단 바 */
 .card-top { display: flex; align-items: center; justify-content: space-between; }
@@ -1301,9 +1420,9 @@ const CSS = `
 
 /* 본문 */
 .card-body { flex: 1; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; padding: 4px 0; }
+  align-items: center; justify-content: center; padding: 0; }
 .word-block { display: flex; flex-direction: column; align-items: center; gap: 10px;
-  padding: 16px 0 20px; }
+  padding: 8px 0 12px; }
 .word-furi { font-size: 15px; color: var(--muted); letter-spacing: 2px;
   font-weight: 400; transition: opacity .18s; min-height: 20px; }
 .word-furi.invisible { opacity: 0; }
@@ -1316,7 +1435,7 @@ const CSS = `
   transition: opacity .18s; min-height: 24px; }
 .word-meaning.invisible { opacity: 0; }
 
-.divider { width: 100%; height: 1px; background: var(--line); margin: 6px 0 20px; }
+.divider { width: 100%; height: 1px; background: var(--line); margin: 4px 0 14px; }
 
 .example { border: none; background: none; cursor: pointer; text-align: center;
   width: 100%; display: flex; flex-direction: column; gap: 8px; padding: 0 6px; }
@@ -1342,7 +1461,7 @@ const CSS = `
   font-size: 16px; font-weight: 700; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   box-shadow: 0 1px 2px rgba(0,0,0,.04); }
-.grade-again { background: var(--surface); color: var(--ink-2); }
+.grade-again { background: var(--accent-30); color: var(--accent); }
 .grade-known { background: var(--accent); color: #fff; }
 .grade:active { transform: scale(0.98); }
 
@@ -1444,6 +1563,18 @@ const CSS = `
   background: var(--accent); color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
 .modal-resume { flex: 1; height: 50px; border-radius: 13px; border: 1px solid var(--ink);
   background: transparent; color: var(--ink); font-size: 15px; font-weight: 600; cursor: pointer; }
+.modal-head-right { display: flex; align-items: center; gap: 8px; }
+.modal-edit { border: 1px solid var(--accent); background: var(--accent-soft);
+  color: var(--accent); height: 32px; padding: 0 14px; border-radius: 980px;
+  font-size: 14px; font-weight: 600; cursor: pointer; }
+.modal-edit-body { display: flex; flex-direction: column; padding: 6px 0 2px; }
+.edit-label { font-size: 12px; font-weight: 600; color: var(--ink-2); margin: 12px 4px 5px; }
+.furi-edit { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Noto Sans JP", monospace;
+  min-height: 64px; }
+.edit-preview { margin-top: 12px; padding: 12px 14px; background: var(--fill);
+  border-radius: 12px; font-size: 17px; color: var(--ink); line-height: 1.7; }
+.edit-preview-label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.modal-save { background: var(--accent); }
 
 /* 통계 */
 .stats { max-width: 480px; margin: 0 auto; }
