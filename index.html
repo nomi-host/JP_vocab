@@ -478,10 +478,10 @@ const Icon = {
       <path d="M8 9h2M8 13h8M8 16h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   ),
-  Star: (p) => (
+  Star: ({ filled, ...p }) => (
     <svg viewBox="0 0 24 24" width="22" height="22" {...p}>
       <path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 17l-5.2 2.6 1-5.8L3.5 9.7l5.9-.9L12 3.5Z"
-        fill={p.filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+        fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
     </svg>
   ),
   Quiz: (p) => (
@@ -1009,6 +1009,21 @@ function statusLabel(c) {
   return { text: `학습 ${c.seen}회`, cls: "tag-seen" };
 }
 
+/* 약점 단어: 퀴즈 오답이 있거나, 최근 학습 3회 중 '다시 학습'이 있는 단어 */
+function isWeak(c) {
+  if (c.suspended) return false;
+  if ((c.quizMiss || 0) > 0) return true;
+  const recent = (c.history || []).slice(-3);
+  return recent.some((h) => h.known === false);
+}
+
+/* 카드의 학습 상태 분류: new / learning / done */
+function statusKind(c) {
+  if (c.suspended || (c.box || 0) >= 4) return "done";
+  if (!c.introducedOn) return "new";
+  return "learning";
+}
+
 function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, onDelete, voiceRef }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(null);
@@ -1176,17 +1191,37 @@ function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, onDele
 function ListView({ cards, setCards, voiceRef }) {
   const [q, setQ] = useState("");
   const [openId, setOpenId] = useState(null);
+  const [flt, setFlt] = useState("all");   // all/new/learning/done/fav/weak
+  const [sort, setSort] = useState("recent"); // recent/kana/seen
+  const counts = useMemo(() => {
+    let fav = 0, weak = 0;
+    for (const c of cards) { if (c.starred) fav++; if (isWeak(c)) weak++; }
+    return { fav, weak };
+  }, [cards]);
+
   const filtered = useMemo(() => {
     const s = q.trim();
-    const base = s
+    let base = s
       ? cards.filter(
           (c) => c.word.includes(s) || (c.reading && c.reading.includes(s)) || c.meaning.includes(s)
         )
       : cards.slice();
-    // 최신 등록이 위로: seq 내림차순 (seq 없으면 뒤로)
+    if (flt === "fav") base = base.filter((c) => c.starred);
+    else if (flt === "weak") base = base.filter((c) => isWeak(c));
+    else if (flt === "new") base = base.filter((c) => statusKind(c) === "new");
+    else if (flt === "learning") base = base.filter((c) => statusKind(c) === "learning");
+    else if (flt === "done") base = base.filter((c) => statusKind(c) === "done");
+
+    const kanaKey = (c) => c.reading || c.word;
     return base
       .map((c, i) => ({ c, i }))
       .sort((a, b) => {
+        // 즐겨찾기는 항상 위로
+        const fa = a.c.starred ? 1 : 0, fb = b.c.starred ? 1 : 0;
+        if (fa !== fb) return fb - fa;
+        if (sort === "kana") return kanaKey(a.c).localeCompare(kanaKey(b.c), "ja");
+        if (sort === "seen") return (b.c.seen || 0) - (a.c.seen || 0);
+        // recent: seq 내림차순
         const sa = a.c.seq, sb = b.c.seq;
         if (sa == null && sb == null) return b.i - a.i;
         if (sa == null) return 1;
@@ -1194,7 +1229,7 @@ function ListView({ cards, setCards, voiceRef }) {
         return sb - sa;
       })
       .map((x) => x.c);
-  }, [q, cards]);
+  }, [q, cards, flt, sort]);
 
   const suspend = (id) => {
     setCards((prev) => prev.map((c) => (c.id === id ? { ...c, suspended: true } : c)));
@@ -1229,24 +1264,80 @@ function ListView({ cards, setCards, voiceRef }) {
 
   const openCard = cards.find((c) => c.id === openId) || null;
 
+  const [refreshMsg, setRefreshMsg] = useState("");
+  const refreshSeed = () => {
+    if (!confirm("기본 단어를 최신 상태로 새로고침할까요?\n오류·중복 단어가 정리되고, 직접 등록한 단어와 학습 기록은 유지됩니다.")) return;
+    setCards((prev) => {
+      const cleaned = reconcileWithSeed(prev);
+      saveCards(cleaned);
+      return cleaned;
+    });
+    setRefreshMsg("기본 단어를 새로고침했어요.");
+    setTimeout(() => setRefreshMsg(""), 3000);
+  };
+
   return (
     <div className="list">
       <h2 className="view-title">단어 목록 <span className="count">{cards.length}</span></h2>
-      <input className="input list-search" placeholder="검색"
+      <input className="input list-search" placeholder="검색 (단어·읽기·뜻·한자)"
         value={q} onChange={(e) => setQ(e.target.value)} />
+      <button className="list-refresh" onClick={refreshSeed}>기본 단어 새로고침 (오류·중복 정리)</button>
+      {refreshMsg && <div className="list-refresh-msg">{refreshMsg}</div>}
+
+      <div className="list-chips">
+        {[
+          ["all", "전체"],
+          ["weak", `약점${counts.weak ? " " + counts.weak : ""}`],
+          ["fav", `즐겨찾기${counts.fav ? " " + counts.fav : ""}`],
+          ["new", "미학습"],
+          ["learning", "학습중"],
+          ["done", "완료"],
+        ].map(([k, label]) => (
+          <button key={k}
+            className={"list-chip" + (flt === k ? " on" : "")}
+            onClick={() => setFlt(k)}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="list-sort">
+        <span className="list-sort-label">정렬</span>
+        {[["recent", "등록순"], ["kana", "가나다순"], ["seen", "학습횟수"]].map(([k, label]) => (
+          <button key={k}
+            className={"list-sort-btn" + (sort === k ? " on" : "")}
+            onClick={() => setSort(k)}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="list-result-count">{filtered.length}개</div>
+
       <div className="rows">
+        {filtered.length === 0 && (
+          <div className="list-empty">
+            {flt === "weak" ? "약점 단어가 없어요. 퀴즈 오답이나 '다시 학습'한 단어가 모여요."
+              : flt === "fav" ? "즐겨찾기한 단어가 없어요. 학습 카드의 별표를 눌러 추가하세요."
+              : "해당하는 단어가 없어요."}
+          </div>
+        )}
         {filtered.map((c) => {
           const st = statusLabel(c);
           return (
             <button className="row" key={c.id} onClick={() => setOpenId(c.id)}>
               <div className="row-word">
                 <div className="row-jp">
+                  {c.starred && <span className="row-star"><Icon.Star filled={true} /></span>}
                   {c.word}
                   {c.hasKanji && c.reading && <span className="row-reading">{c.reading}</span>}
                 </div>
                 <div className="row-meaning">{c.meaning}</div>
               </div>
-              <span className={"tag " + st.cls}>{st.text}</span>
+              <div className="row-tags">
+                {isWeak(c) && <span className="tag tag-weak">약점</span>}
+                <span className={"tag " + st.cls}>{st.text}</span>
+              </div>
             </button>
           );
         })}
@@ -1333,7 +1424,7 @@ function buildQuizRound(cards, mode) {
   });
 }
 
-function QuizView({ cards }) {
+function QuizView({ cards, setCards }) {
   const [mode, setMode] = useState("meaning"); // meaning=뜻맞추기, word=단어맞추기
   const [round, setRound] = useState([]);      // 이번 라운드 문제 배열
   const [qi, setQi] = useState(0);             // 현재 문제 인덱스
@@ -1418,7 +1509,16 @@ function QuizView({ cards }) {
   const choose = (i) => {
     if (picked !== null) return;
     setPicked(i);
-    if (q.options[i].id === q.answerId) setCorrect((n) => n + 1);
+    const isRight = q.options[i].id === q.answerId;
+    if (isRight) setCorrect((n) => n + 1);
+    // 오답/정답을 카드에 반영(약점 단어 추적)
+    if (setCards) {
+      setCards((prev) => prev.map((c) => {
+        if (c.id !== q.answerId) return c;
+        const miss = c.quizMiss || 0;
+        return { ...c, quizMiss: isRight ? Math.max(0, miss - 1) : miss + 1 };
+      }));
+    }
   };
   const next = () => {
     if (qi + 1 >= round.length) { setFinished(true); return; }
@@ -1565,12 +1665,90 @@ function StatsView({ cards, timeLog, setCards, setTimeLog }) {
         </div>
       </div>
 
+      <StudyCalendar cards={cards} />
+
       <BackupBox cards={cards} timeLog={timeLog} setCards={setCards} setTimeLog={setTimeLog} />
     </div>
   );
 }
 
 /* 데이터 백업/복원: 기기 로컬 JSON 파일로 내보내고 불러오기 */
+/* 연속 학습 캘린더: 깃허브 잔디형. 최근 약 17주간 날짜별 학습 단어 수를 강도로 표시 */
+function StudyCalendar({ cards }) {
+  const { weeks, monthLabels, total } = useMemo(() => {
+    // 날짜별 학습 단어 수
+    const perDay = {};
+    for (const c of cards) {
+      const days = new Set((c.history || []).map((h) => h.d));
+      days.forEach((d) => { perDay[d] = (perDay[d] || 0) + 1; });
+    }
+    const WEEKS = 17;
+    const today = new Date();
+    // 이번 주 토요일 기준으로 끝을 맞춤(일~토 컬럼)
+    const end = new Date(today);
+    end.setDate(end.getDate() + (6 - end.getDay())); // 이번 주 토요일
+    const start = new Date(end);
+    start.setDate(start.getDate() - (WEEKS * 7 - 1));
+
+    const weeks = [];
+    let cur = new Date(start);
+    const monthLabels = [];
+    let total = 0;
+    for (let w = 0; w < WEEKS; w++) {
+      const col = [];
+      for (let d = 0; d < 7; d++) {
+        const ds = cur.toISOString().slice(0, 10);
+        const count = perDay[ds] || 0;
+        const future = cur > today;
+        if (!future && count > 0) total += 1;
+        // 강도 0~4
+        let lv = 0;
+        if (count > 0) lv = count >= 20 ? 4 : count >= 12 ? 3 : count >= 5 ? 2 : 1;
+        col.push({ ds, count, lv, future });
+        // 월 라벨: 그 주 첫날이 1~7일이면 월 표기
+        if (d === 0) {
+          const dd = cur.getDate();
+          monthLabels.push(dd <= 7 ? (cur.getMonth() + 1) + "월" : "");
+        }
+        cur.setDate(cur.getDate() + 1);
+      }
+      weeks.push(col);
+    }
+    return { weeks, monthLabels, total };
+  }, [cards]);
+
+  return (
+    <div className="cal-box">
+      <div className="cal-title">학습 캘린더 <span className="cal-total">{total}일</span></div>
+      <div className="cal-scroll">
+        <div className="cal-months">
+          {monthLabels.map((m, i) => <div className="cal-month" key={i}>{m}</div>)}
+        </div>
+        <div className="cal-grid">
+          {weeks.map((col, wi) => (
+            <div className="cal-col" key={wi}>
+              {col.map((cell, di) => (
+                <div key={di}
+                  className={"cal-cell cal-lv" + cell.lv + (cell.future ? " cal-future" : "")}
+                  title={cell.future ? "" : `${cell.ds} · ${cell.count}개`} />
+              ))}
+            </div>
+          ))}
+        </div>
+        <div className="cal-legend">
+          <span>적음</span>
+          <span className="cal-cell cal-lv0" />
+          <span className="cal-cell cal-lv1" />
+          <span className="cal-cell cal-lv2" />
+          <span className="cal-cell cal-lv3" />
+          <span className="cal-cell cal-lv4" />
+          <span>많음</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BackupBox({ cards, timeLog, setCards, setTimeLog }) {
   const fileRef = useRef(null);
   const [msg, setMsg] = useState("");
@@ -1617,14 +1795,27 @@ function BackupBox({ cards, timeLog, setCards, setTimeLog }) {
     e.target.value = "";
   };
 
-  const refreshSeed = () => {
-    if (!confirm("기본 단어를 최신 상태로 새로고침할까요?\n오류·중복 단어가 정리되고, 직접 등록한 단어와 학습 기록은 유지됩니다.")) return;
+  const resetProgress = () => {
+    if (!confirm("학습 이력만 초기화할까요?\n등록한 단어는 그대로 두고, 학습 기록(진도·복습 일정·연속일·학습시간)만 모두 지웁니다. 되돌릴 수 없어요.")) return;
     setCards((prev) => {
-      const cleaned = reconcileWithSeed(prev);
-      saveCards(cleaned);
-      return cleaned;
+      const cleared = prev.map((c) => ({
+        ...c,
+        box: 0,
+        due: null,
+        introducedOn: null,
+        seen: 0,
+        suspended: false,
+        history: [],
+      }));
+      saveCards(cleared);
+      return cleared;
     });
-    setMsg("기본 단어를 새로고침했어요.");
+    setTimeLog(() => {
+      const empty = {};
+      saveTimeLog(empty);
+      return empty;
+    });
+    setMsg("학습 이력을 초기화했어요.");
   };
 
   return (
@@ -1636,10 +1827,10 @@ function BackupBox({ cards, timeLog, setCards, setTimeLog }) {
       <div className="backup-btns">
         <button className="backup-btn" onClick={exportData}>내보내기</button>
         <button className="backup-btn" onClick={() => fileRef.current && fileRef.current.click()}>불러오기</button>
+        <button className="backup-btn backup-btn-reset" onClick={resetProgress}>학습기록 초기화</button>
         <input ref={fileRef} type="file" accept="application/json,.json"
           onChange={importData} style={{ display: "none" }} />
       </div>
-      <button className="backup-refresh" onClick={refreshSeed}>기본 단어 새로고침 (오류·중복 정리)</button>
       {msg && <div className="backup-msg">{msg}</div>}
     </div>
   );
@@ -1842,7 +2033,7 @@ function App() {
           {tab === "study" && <StudyView cards={cards} setCards={setCards} voiceRef={voiceRef} timeLog={timeLog} />}
           {tab === "add" && <AddView cards={cards} setCards={setCards} voiceRef={voiceRef} />}
           {tab === "list" && <ListView cards={cards} setCards={setCards} voiceRef={voiceRef} />}
-          {tab === "quiz" && <QuizView cards={cards} />}
+          {tab === "quiz" && <QuizView cards={cards} setCards={setCards} />}
           {tab === "stats" && <StatsView cards={cards} timeLog={timeLog} setCards={setCards} setTimeLog={setTimeLog} />}
         </main>
       </div>
@@ -2041,34 +2232,52 @@ const CSS = `
   margin-top: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
 .backup-head { font-size: 16px; font-weight: 700; color: var(--ink); margin-bottom: 6px; }
 .backup-desc { font-size: 13px; color: var(--muted); line-height: 1.6; margin-bottom: 14px; }
-.backup-btns { display: flex; gap: 10px; }
+.backup-btns { display: flex; gap: 8px; }
 .backup-btn { flex: 1; height: 46px; border-radius: 12px; border: 1px solid var(--accent);
-  background: var(--accent-soft); color: var(--accent); font-size: 15px; font-weight: 600; cursor: pointer; }
+  background: var(--accent-soft); color: var(--accent); font-size: 13px; font-weight: 600;
+  cursor: pointer; padding: 0 4px; line-height: 1.2; }
 .backup-btn:active { background: var(--accent-30); }
 .backup-msg { margin-top: 12px; font-size: 13px; color: var(--accent-deep); }
-.backup-refresh { width: 100%; height: 44px; margin-top: 10px; border-radius: 12px;
+.backup-btn-reset { border-color: var(--line); background: var(--fill); color: var(--ink-2); }
+.list-refresh { width: 100%; height: 42px; margin: 0 0 12px; border-radius: 12px;
   border: 1px solid var(--line); background: var(--fill); color: var(--ink-2);
   font-size: 14px; font-weight: 600; cursor: pointer; }
+.list-refresh-msg { font-size: 13px; color: var(--accent-deep); margin: -4px 0 12px; }
+.list-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.list-chip { height: 32px; padding: 0 12px; border-radius: 980px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink-2); font-size: 13px; font-weight: 600; cursor: pointer; }
+.list-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.list-sort { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.list-sort-label { font-size: 12px; color: var(--muted); margin-right: 2px; }
+.list-sort-btn { height: 28px; padding: 0 10px; border-radius: 8px; border: none;
+  background: transparent; color: var(--ink-2); font-size: 13px; font-weight: 600; cursor: pointer; }
+.list-sort-btn.on { background: var(--accent-soft); color: var(--accent-deep); }
+.list-result-count { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.list-empty { text-align: center; color: var(--muted); font-size: 14px; line-height: 1.6; padding: 30px 16px; }
+.row-star { display: inline-flex; vertical-align: middle; margin-right: 5px; color: var(--accent); }
+.row-star svg { width: 15px; height: 15px; }
+.row-tags { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+.tag-weak { background: var(--accent-soft); color: var(--accent-deep); border: 1px solid var(--accent-30); }
 
 /* 학습 완료 팝업 */
 .finish-screen { display: flex; align-items: flex-start; justify-content: center;
-  padding: 24px 16px 40px; }
+  padding: 14px 16px 20px; }
 .finish-card { width: 100%; max-width: 420px; background: var(--accent);
-  border-radius: 26px; padding: 30px 24px 24px; text-align: center;
+  border-radius: 24px; padding: 20px 20px 18px; text-align: center;
   box-shadow: 0 10px 40px rgba(0,140,215,.35); animation: pop .25s cubic-bezier(.2,.8,.2,1); }
-.finish-title { color: #fff; font-size: 22px; font-weight: 800; letter-spacing: -0.3px;
-  margin-bottom: 22px; }
-.finish-stats { display: flex; gap: 12px; margin-bottom: 22px; }
-.finish-stat { flex: 1; background: rgba(255,255,255,.15); border-radius: 16px; padding: 14px 10px; }
-.finish-stat-label { display: block; color: rgba(255,255,255,.85); font-size: 13px; margin-bottom: 6px; }
-.finish-stat-value { display: block; color: #fff; font-size: 19px; font-weight: 700; }
-.finish-img { width: 100%; max-width: 300px; border-radius: 20px; display: block;
-  margin: 0 auto 22px; }
-.finish-extra { width: 100%; height: 52px; border-radius: 14px; border: none;
-  background: #fff; color: var(--accent); font-size: 17px; font-weight: 700; cursor: pointer; }
-.finish-close { width: 100%; height: 48px; margin-top: 10px; border-radius: 14px;
+.finish-title { color: #fff; font-size: 21px; font-weight: 800; letter-spacing: -0.3px;
+  margin-bottom: 16px; }
+.finish-stats { display: flex; gap: 10px; margin-bottom: 16px; }
+.finish-stat { flex: 1; background: rgba(255,255,255,.15); border-radius: 14px; padding: 10px 8px; }
+.finish-stat-label { display: block; color: rgba(255,255,255,.85); font-size: 12px; margin-bottom: 4px; }
+.finish-stat-value { display: block; color: #fff; font-size: 18px; font-weight: 700; }
+.finish-img { width: 100%; max-width: 220px; border-radius: 18px; display: block;
+  margin: 0 auto 16px; }
+.finish-extra { width: 100%; height: 48px; border-radius: 14px; border: none;
+  background: #fff; color: var(--accent); font-size: 16px; font-weight: 700; cursor: pointer; }
+.finish-close { width: 100%; height: 44px; margin-top: 8px; border-radius: 14px;
   border: 1px solid rgba(255,255,255,.5); background: transparent; color: #fff;
-  font-size: 16px; font-weight: 600; cursor: pointer; }
+  font-size: 15px; font-weight: 600; cursor: pointer; }
 .grade-known { background: var(--accent); color: #fff; }
 .grade:active { transform: scale(0.98); }
 
@@ -2115,7 +2324,7 @@ const CSS = `
 
 /* 목록 */
 .count { font-size: 13px; color: var(--muted); font-weight: 600; }
-.list-search { margin: 6px 0 14px; }
+.list-search { margin: 6px 0 10px; }
 .rows { display: flex; flex-direction: column; gap: 8px; }
 .row { background: var(--surface); border-radius: 14px; padding: 12px 14px;
   display: flex; align-items: center; gap: 10px; width: 100%;
@@ -2208,6 +2417,25 @@ const CSS = `
 .stat-progress-fill { height: 100%; background: var(--accent); border-radius: 980px; transition: width .3s; }
 .chart-box { background: var(--surface); border-radius: 16px; padding: 16px;
   box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.cal-box { background: var(--surface); border-radius: 16px; padding: 16px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04); margin-top: 14px; }
+.cal-title { font-size: 15px; font-weight: 700; color: var(--ink); margin-bottom: 12px; }
+.cal-total { font-size: 13px; font-weight: 600; color: var(--accent); margin-left: 4px; }
+.cal-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.cal-months { display: flex; gap: 3px; margin-bottom: 4px; }
+.cal-month { width: 13px; font-size: 9px; color: var(--muted); flex-shrink: 0; white-space: nowrap; }
+.cal-grid { display: flex; gap: 3px; }
+.cal-col { display: flex; flex-direction: column; gap: 3px; }
+.cal-cell { width: 13px; height: 13px; border-radius: 3px; background: var(--fill); flex-shrink: 0; }
+.cal-lv0 { background: #EAEFF2; }
+.cal-lv1 { background: var(--accent-30); }
+.cal-lv2 { background: var(--accent-60); }
+.cal-lv3 { background: var(--accent); }
+.cal-lv4 { background: var(--accent-deep); }
+.cal-future { background: transparent; }
+.cal-legend { display: flex; align-items: center; gap: 4px; margin-top: 10px;
+  font-size: 10px; color: var(--muted); }
+.cal-legend .cal-cell { width: 11px; height: 11px; }
 .chart-title { font-size: 14px; font-weight: 600; color: var(--ink); margin-bottom: 14px; }
 .chart { display: flex; align-items: flex-end; gap: 8px; height: 120px; }
 .chart-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; }
