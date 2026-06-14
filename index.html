@@ -1640,7 +1640,7 @@ function QuizView({ cards, setCards, setQuizLog }) {
   );
 }
 
-function StatsView({ cards, timeLog, setCards, setTimeLog }) {
+function StatsView({ cards, timeLog, quizLog, setCards, setTimeLog, setQuizLog }) {
   const stats = useMemo(() => {
     // 학습 횟수 합계(개별 단어 채점) / 학습한 단어 수 / 학습한 날짜 집합
     let totalReviews = 0;
