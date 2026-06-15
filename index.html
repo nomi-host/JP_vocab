@@ -102,20 +102,24 @@ function useJaVoice() {
       const vs = synth.getVoices();
       const ja = vs.filter((v) => v.lang && v.lang.toLowerCase().startsWith("ja"));
       if (ja.length === 0) { voiceRef.current = null; return; }
-      // 우선순위: O-Ren(고품질) > Siri > Kyoko > Hattori. 사용자가 O-Ren을 선호.
+      // 품질(고품질/프리미엄)을 최우선으로, 그다음 선호 보이스(O-Ren) 순.
       const score = (v) => {
-        const n = (v.name || "").toLowerCase();
+        const n = ((v.name || "") + " " + (v.voiceURI || "")).toLowerCase();
         let s = 0;
-        if (n.includes("o-ren") || n.includes("oren")) s += 10;
-        if (n.includes("siri")) s += 6;
-        if (n.includes("kyoko")) s += 4;
-        if (n.includes("hattori")) s += 3;
-        if (n.includes("enhanced") || n.includes("premium")) s += 2; // 같은 음성이면 고품질 우선
+        // 품질 가중치를 가장 크게 (compact보다 enhanced/premium 우선)
+        if (n.includes("premium")) s += 100;
+        else if (n.includes("enhanced")) s += 80;
+        if (n.includes("o-ren") || n.includes("oren")) s += 20;
+        else if (n.includes("siri")) s += 14;
+        else if (n.includes("kyoko")) s += 8;
+        else if (n.includes("hattori")) s += 6;
         if (v.localService) s += 1;
         return s;
       };
       ja.sort((a, b) => score(b) - score(a));
       voiceRef.current = ja[0];
+      // 디버깅용: 선택된 보이스를 전역에 노출 (콘솔에서 window.__jaVoice 확인)
+      try { window.__jaVoices = ja.map((v) => v.name); window.__jaVoice = ja[0] && ja[0].name; } catch (e) {}
     }
     pick();
     if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = pick;
@@ -404,19 +408,32 @@ function buildReviewQueue(cards, limit) {
   return seededShuffle(pool, seed).slice(0, lim);
 }
 
-/* known=true('알고있음') → box 상승, box별 간격만큼 뒤로 / false('다시 학습') → box 1로, 세션 내 재노출 */
+/* known=true('알고있음') → box 상승 / false('다시 학습') → box 1로, 세션 내 재노출.
+   복습 간격은 그동안 '다시 학습'(오답) 횟수가 적을수록 길게(망각곡선 가속). */
+function nextReviewDays(card, known) {
+  // 이 카드를 지금 채점했을 때 다음 복습까지 며칠 뒤인지 계산
+  const wrongs = (card.history || []).filter((h) => h.known === false).length + (known ? 0 : 1);
+  if (!known) return 1; // 틀리면 내일 다시
+  // 누적 오답이 적을수록 긴 간격. 0회=30일, 1회=14일, 2회=7일, 3회=3일, 그 이상=1일
+  const byWrong = [30, 14, 7, 3, 1];
+  const base = byWrong[Math.min(wrongs, byWrong.length - 1)];
+  // 같은 단어를 여러 번 맞힐수록 조금씩 더 늘림(box 보너스)
+  const boxBonus = Math.max(0, (card.box || 0) - 1);
+  return base + boxBonus * Math.round(base * 0.5);
+}
+
 function gradeCard(card, known) {
   const today = todayStr();
   const c = { ...card };
   if (!c.introducedOn) c.introducedOn = today;
   c.seen += 1;
+  const days = nextReviewDays(c, known);
   c.history = [...c.history, { d: today, known }];
   if (known) {
     c.box = Math.min(MAX_BOX, Math.max(1, c.box) + 1);
   } else {
     c.box = 1;
   }
-  const days = BOX_INTERVALS[c.box] || 1;
   c.due = new Date(Date.now() + days * DAY).toISOString().slice(0, 10);
   return c;
 }
@@ -528,12 +545,14 @@ function FlashCard({ card, isNew, voiceRef, onToggleStar, starred }) {
   const [speaking, setSpeaking] = useState("idle");
   const ex = useMemo(() => getExample(card), [card.id]);
 
-  // 새 카드가 나오면 첫 화면 = 한자/예문만, 의미·후리가나 숨김
-  useEffect(() => {
-    setShowMeaning(false);
-    setShowFuri(false);
-    setHideAll(false);
-  }, [card.id]);
+  // 카드가 바뀌면 렌더 중 즉시 초기화(이펙트로 하면 한 프레임 옛 상태가 노출되어 깜빡임 발생)
+  const prevId = useRef(card.id);
+  if (prevId.current !== card.id) {
+    prevId.current = card.id;
+    if (showMeaning) setShowMeaning(false);
+    if (showFuri) setShowFuri(false);
+    if (hideAll) setHideAll(false);
+  }
 
   const cleanWord = card.word.split(/[／/・↔≠\s(]/)[0];
   const meaningVisible = showMeaning && !hideAll;
@@ -674,7 +693,8 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
       if (!prev) return prev;
       const queue = prev.queue.slice();
       if (!known) {
-        const insertAt = Math.min(queue.length, prev.pos + 4);
+        // '다시 학습' → 큐 뒤쪽으로 충분히 보냄(앞으로 8칸 뒤, 또는 거의 끝)
+        const insertAt = Math.min(queue.length, prev.pos + 8);
         queue.splice(insertAt, 0, currentId);
       }
       return {
@@ -702,21 +722,30 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
 
   const onTouchStart = (e) => {
     const t = e.touches[0];
-    swipe.current = { x: t.clientX, y: t.clientY, active: true };
+    swipe.current = { x: t.clientX, y: t.clientY, active: true, dir: null };
   };
   const onTouchMove = (e) => {
     if (!swipe.current.active) return;
     const t = e.touches[0];
     const dx = t.clientX - swipe.current.x;
     const dy = t.clientY - swipe.current.y;
-    if (Math.abs(dx) > Math.abs(dy)) {
-      setDrag(dx);
-      if (e.cancelable) e.preventDefault();
+    // 방향 잠금: 처음 10px 이상 움직인 축으로 제스처 방향 결정
+    if (!swipe.current.dir) {
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+      swipe.current.dir = Math.abs(dx) > Math.abs(dy) ? "h" : "v";
     }
+    if (swipe.current.dir === "h") {
+      setDrag(dx);
+      if (e.cancelable) e.preventDefault(); // 가로 스와이프 중엔 세로 스크롤·새로고침 막기
+    }
+    // 세로(v)로 잠기면 카드 스와이프는 무시 → 당겨서 새로고침이 정상 동작
   };
   const onTouchEnd = () => {
+    const dir = swipe.current.dir;
     const dx = drag;
     swipe.current.active = false;
+    swipe.current.dir = null;
+    if (dir !== "h") { setDrag(0); return; }
     if (dx <= -90) { setDrag(0); triggerGrade(false, true); }
     else if (dx >= 90) { setDrag(0); triggerGrade(true, true); }
     else setDrag(0);
@@ -867,10 +896,12 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
 
       <div className="grade-row">
         <button className="grade grade-again" onClick={() => grade(false)}>
-          다시 학습
+          <span className="grade-label">다시 학습</span>
+          <span className="grade-sub">내일 다시</span>
         </button>
         <button className="grade grade-known" onClick={() => grade(true)}>
-          <Icon.Check /> 알고있음
+          <span className="grade-label"><Icon.Check /> 알고있음</span>
+          <span className="grade-sub">{nextReviewDays(current, true)}일 뒤 학습</span>
         </button>
       </div>
     </div>
@@ -1456,26 +1487,35 @@ function quizSubjectPool(cards) {
 }
 
 // 한국어 뜻으로 품사 대략 분류: 동사/형용사(다로 끝남) vs 명사 vs 기타
-function posClass(meaning) {
-  if (!meaning) return "etc";
-  // 첫 번째 뜻만 보고 판단(쉼표/슬래시 앞)
+function posClass(card) {
+  const meaning = typeof card === "string" ? card : (card && card.meaning) || "";
+  const word = typeof card === "string" ? "" : (card && card.word) || "";
+  const reading = typeof card === "string" ? "" : (card && card.reading) || "";
+  const ja = reading || word;
   const first = meaning.split(/[,/·]/)[0].trim();
-  if (/다$/.test(first)) return "verb";          // ~하다, ~되다, ~지다 등
-  if (/[은는한운]$|스럽다$|롭다$/.test(first)) return "adj";
-  if (/[을를](.*)?$/.test(first) && /다$/.test(first)) return "verb";
-  // 괄호 설명만 있는 조사/표현
-  if (/^[~\(]/.test(first)) return "expr";
+
+  if (/[~～(]/.test(word)) return "expr";
+  if (/い$/.test(ja)) {
+    if (/(쁘다|프다|싸다|좋다|많다|적다|높다|낮다|길다|짧다|크다|작다|넓다|좁다|깊다|얕다|밝다|어둡다|쉽다|어렵다|같다|다)$/.test(first)) return "adj";
+  }
+  if (/[うくぐすつぬぶむる]$/.test(ja) && /다$/.test(first)) return "verb";
+  if (/(롭다|스럽다|답다)$/.test(first)) return "adj";
+  if (/하다$/.test(first)) return "verb";
+  if (/다$/.test(first)) {
+    if (/(쁘다|프다|쉽다|어렵다|싶다|같다)$/.test(first)) return "adj";
+    return "verb";
+  }
+  if (/^[~～(]/.test(first)) return "expr";
   return "noun";
 }
 
-// 정답과 같은 품사의 그럴듯한 오답 우선 선택, 부족하면 무작위로 채움
 function pickDistractors(all, answer, n) {
-  const targetPos = posClass(answer.meaning);
+  const targetPos = posClass(answer);
   const sameClass = [];
   const others = [];
   for (const c of all) {
     if (c.id === answer.id) continue;
-    if (posClass(c.meaning) === targetPos) sameClass.push(c);
+    if (posClass(c) === targetPos) sameClass.push(c);
     else others.push(c);
   }
   const out = shuffleArr(sameClass).slice(0, n);
@@ -1785,12 +1825,14 @@ function StudyCalendar({ cards, quizLog }) {
         const quizN = (quizLog && quizLog[ds]) || 0;
         const future = cur > today;
         if (!future && count > 0) total += 1;
-        // 5단계: 0개=1, 1개이상=2, 20개(100%)=3, 40개(200%)=4, 퀴즈20문제이상=5
+        // 학습량 기준 단계: 0개=1, 1개+=2, 20개(100%)=3, 40개(200%)=4
         let lv = 1;
-        if (quizN >= 20) lv = 5;
-        else if (count >= NEW_PER_DAY * 2) lv = 4;
+        if (count >= NEW_PER_DAY * 2) lv = 4;
         else if (count >= NEW_PER_DAY) lv = 3;
         else if (count > 0) lv = 2;
+        // 퀴즈 20문제 이상이면 한 단계 보너스(최대 5단계)
+        // 예: 학습20+퀴즈20 → 3+1=4, 학습40+퀴즈20 → 4+1=5
+        if (quizN >= 20 && lv >= 2) lv = Math.min(5, lv + 1);
         col.push({ ds, count, quizN, lv, future });
         if (d === 0) {
           const dd = cur.getDate();
@@ -2053,6 +2095,24 @@ function saveQuizLog(log) {
   } catch (e) {}
 }
 
+const SESSION_KEY = "jp-vocab-session-v1";
+function loadSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    // 오늘 날짜의 세션만 복원(어제 세션은 폐기 → 새로 구성)
+    if (!obj || obj.date !== todayStr()) return null;
+    return obj.session || null;
+  } catch (e) { return null; }
+}
+function saveSession(session) {
+  try {
+    if (!session) { localStorage.removeItem(SESSION_KEY); return; }
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ date: todayStr(), session }));
+  } catch (e) {}
+}
+
 /* 연속 학습일 계산: 오늘(또는 어제)부터 거꾸로 학습기록이 끊기지 않은 일수 */
 function calcStreak(timeLog) {
   if (!timeLog) return 0;
@@ -2073,12 +2133,17 @@ function calcStreak(timeLog) {
 function App() {
   const [cards, setCards] = useState(loadCards);
   const [tab, setTab] = useState("study");
-  // 학습 세션 상태(탭 전환에도 유지). null이면 StudyView가 새 세션을 만든다.
-  const [studySession, setStudySession] = useState(null);
+  // 학습 세션 상태(탭 전환·앱 재실행에도 유지). 오늘 날짜의 세션만 복원.
+  const [studySession, setStudySession] = useState(loadSession);
   const [version, setVersion] = useState(1);
   const [timeLog, setTimeLog] = useState(loadTimeLog);
   const [quizLog, setQuizLog] = useState(loadQuizLog);
   const voiceRef = useJaVoice();
+
+  // 세션 변경 시 저장
+  useEffect(() => {
+    saveSession(studySession);
+  }, [studySession]);
 
   const todaySec = timeLog[todayStr()] || 0;
 
@@ -2285,10 +2350,12 @@ const CSS = `
 .ctrl-toggle:disabled { opacity: .35; cursor: default; }
 
 .grade-row { display: flex; gap: 10px; margin-top: 14px; }
-.grade { flex: 1; border: none; border-radius: 16px; padding: 17px 0;
+.grade { flex: 1; border: none; border-radius: 16px; padding: 12px 0;
   font-size: 16px; font-weight: 700; cursor: pointer;
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.grade-label { display: inline-flex; align-items: center; gap: 6px; }
+.grade-sub { font-size: 11px; font-weight: 600; opacity: .75; }
 .grade-again { background: var(--accent-30); color: var(--accent-deep); }
 .swipe-wrap { position: relative; touch-action: pan-y; }
 .swipe-tag { position: absolute; top: 18px; z-index: 5; padding: 7px 16px;
