@@ -156,6 +156,17 @@ async function fetchGoogleAudio(text, s) {
   return url;
 }
 
+/* 미리 불러오기: 재생하지 않고 캐시에만 채워 다음 카드 음성을 즉시 들리게 함 */
+function prefetchAudio(text) {
+  if (!text) return;
+  if (ttsSettings.engine !== "google") return; // 내장 음성은 미리받기 불필요
+  const s = ttsSettings;
+  if (s.gender === "random") return; // 랜덤은 매번 목소리가 달라 캐시 효과 없음
+  const key = cacheKey(text, s);
+  if (ttsCache.has(key)) return;
+  fetchGoogleAudio(text, s).catch(() => {}); // 실패는 조용히 무시(실제 재생 때 폴백)
+}
+
 function stopAudio() {
   if (currentAudio) { try { currentAudio.pause(); } catch {} currentAudio = null; }
   if (window.speechSynthesis) window.speechSynthesis.cancel();
@@ -774,6 +785,17 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
   const s = session || { queue: [], pos: 0, doneCount: 0, total: 0, extraLimit: NEW_PER_DAY, done: false, dismissed: false };
   const currentId = s.queue[s.pos];
   const current = cards.find((c) => c.id === currentId) || null;
+
+  // 다음 카드 음성 미리 불러오기(현재 카드를 보는 동안 백그라운드로)
+  useEffect(() => {
+    const nextId = s.queue[s.pos + 1];
+    if (!nextId) return;
+    const next = cardsRef.current.find((c) => c.id === nextId);
+    if (!next) return;
+    prefetchAudio(wordSpeech(next));
+    const ex = getExample(next);
+    if (ex && ex.tokens && ex.tokens.length) prefetchAudio(exampleSpeech(ex));
+  }, [currentId, s.pos]);
 
   useEffect(() => {
     if (!current) return;
@@ -1920,7 +1942,6 @@ function StatsView({ cards, timeLog, quizLog, setCards, setTimeLog, setQuizLog }
 function VoiceSettings() {
   const [s, setS] = useState(ttsSettings);
   const [testState, setTestState] = useState("idle");
-  const [diag, setDiag] = useState("");
   const voiceRef = useRef(null);
 
   const update = (patch) => {
@@ -1936,7 +1957,12 @@ function VoiceSettings() {
 
   return (
     <div className="voice-box">
-      <div className="voice-title">음성 설정</div>
+      <div className="voice-titlerow">
+        <div className="voice-title">음성 설정</div>
+        <button className="voice-test-sm" onClick={preview} disabled={testState === "loading"}>
+          {testState === "loading" ? "불러오는 중…" : testState === "playing" ? "재생 중…" : "미리듣기"}
+        </button>
+      </div>
 
       <div className="voice-row">
         <span className="voice-label">음질</span>
@@ -1969,30 +1995,6 @@ function VoiceSettings() {
         </div>
       </div>
 
-      <button className="voice-test" onClick={preview} disabled={testState === "loading"}>
-        {testState === "loading" ? "불러오는 중…" : testState === "playing" ? "재생 중…" : "미리듣기"}
-      </button>
-
-      <button className="voice-test" style={{ marginTop: 8, borderColor: "var(--line)", background: "var(--fill)", color: "var(--ink-2)" }}
-        onClick={async () => {
-          setDiag("진단 중…");
-          try {
-            const r = await fetch(TTS_URL, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ text: "テスト", gender: s.gender, rate: s.rate }),
-            });
-            let txt;
-            try { txt = JSON.stringify(await r.json()).slice(0, 300); }
-            catch { txt = "(JSON 아님) " + (await r.text()).slice(0, 200); }
-            setDiag("HTTP " + r.status + " · " + txt);
-          } catch (e) {
-            setDiag("요청 실패: " + String(e && e.message ? e.message : e));
-          }
-        }}>
-        연결 진단
-      </button>
-      {diag && <p className="voice-note" style={{ wordBreak: "break-all" }}>{diag}</p>}
       {s.engine === "google" && (
         <p className="voice-note">고음질은 인터넷 연결이 필요해요. 성별을 랜덤으로 두면 단어마다 다른 목소리가 나올 수 있어요.</p>
       )}
@@ -2627,6 +2629,14 @@ const CSS = `
 .voice-box { background: var(--surface); border-radius: 18px; padding: 18px;
   margin-top: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
 .voice-title { font-size: 16px; font-weight: 700; color: var(--ink); margin-bottom: 14px; }
+.voice-titlerow { display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px; }
+.voice-titlerow .voice-title { margin-bottom: 0; }
+.voice-test-sm { height: 34px; padding: 0 14px; border-radius: 10px;
+  border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent);
+  font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.voice-test-sm:active { background: var(--accent-30); }
+.voice-test-sm:disabled { opacity: .6; }
 .voice-row { display: flex; align-items: center; justify-content: space-between;
   gap: 12px; margin-bottom: 12px; }
 .voice-label { font-size: 14px; font-weight: 600; color: var(--ink-2); flex-shrink: 0; }
@@ -2638,17 +2648,12 @@ const CSS = `
 .voice-rate input[type=range] { flex: 1; accent-color: var(--accent); }
 .voice-rate-val { font-size: 13px; font-weight: 600; color: var(--accent-deep);
   min-width: 44px; text-align: right; }
-.voice-test { width: 100%; height: 44px; margin-top: 6px; border-radius: 12px;
-  border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent);
-  font-size: 14px; font-weight: 600; cursor: pointer; }
-.voice-test:active { background: var(--accent-30); }
-.voice-test:disabled { opacity: .6; }
 .voice-note { font-size: 12px; color: var(--muted); line-height: 1.6; margin: 10px 0 0; }
 .backup-head { font-size: 16px; font-weight: 700; color: var(--ink); margin-bottom: 6px; }
 .backup-desc { font-size: 13px; color: var(--muted); line-height: 1.6; margin-bottom: 14px; }
 .backup-btns { display: flex; gap: 8px; }
-.backup-btn { flex: 1; height: 46px; border-radius: 12px; border: 1px solid var(--accent);
-  background: var(--accent-soft); color: var(--accent); font-size: 13px; font-weight: 600;
+.backup-btn { flex: 1; height: 34px; border-radius: 10px; border: 1px solid var(--accent);
+  background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 600;
   cursor: pointer; padding: 0 4px; line-height: 1.2; }
 .backup-btn:active { background: var(--accent-30); }
 .backup-msg { margin-top: 12px; font-size: 13px; color: var(--accent-deep); }
