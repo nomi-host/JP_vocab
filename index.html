@@ -1920,6 +1920,7 @@ function StatsView({ cards, timeLog, quizLog, setCards, setTimeLog, setQuizLog }
 function VoiceSettings() {
   const [s, setS] = useState(ttsSettings);
   const [testState, setTestState] = useState("idle");
+  const [diag, setDiag] = useState("");
   const voiceRef = useRef(null);
 
   const update = (patch) => {
@@ -1971,6 +1972,27 @@ function VoiceSettings() {
       <button className="voice-test" onClick={preview} disabled={testState === "loading"}>
         {testState === "loading" ? "불러오는 중…" : testState === "playing" ? "재생 중…" : "미리듣기"}
       </button>
+
+      <button className="voice-test" style={{ marginTop: 8, borderColor: "var(--line)", background: "var(--fill)", color: "var(--ink-2)" }}
+        onClick={async () => {
+          setDiag("진단 중…");
+          try {
+            const r = await fetch(TTS_URL, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text: "テスト", gender: s.gender, rate: s.rate }),
+            });
+            let txt;
+            try { txt = JSON.stringify(await r.json()).slice(0, 300); }
+            catch { txt = "(JSON 아님) " + (await r.text()).slice(0, 200); }
+            setDiag("HTTP " + r.status + " · " + txt);
+          } catch (e) {
+            setDiag("요청 실패: " + String(e && e.message ? e.message : e));
+          }
+        }}>
+        연결 진단
+      </button>
+      {diag && <p className="voice-note" style={{ wordBreak: "break-all" }}>{diag}</p>}
       {s.engine === "google" && (
         <p className="voice-note">고음질은 인터넷 연결이 필요해요. 성별을 랜덤으로 두면 단어마다 다른 목소리가 나올 수 있어요.</p>
       )}
