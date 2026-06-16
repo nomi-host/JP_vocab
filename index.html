@@ -104,9 +104,84 @@ function getExample(card) {
   return card.ex || { ja: "", ko: "", tokens: [] };
 }
 
-/* ===================== TTS (브라우저 내장) =====================
-   ===ADAPTER===: 고음질이 필요하면 아래 speak()를 클라우드 TTS
-   (Google/Azure 등) fetch 호출로 교체하면 됨. 기본은 무료·무제한.   */
+/* ===================== TTS =====================
+   1순위: Google Cloud TTS(Chirp3 HD) — 프록시 경유, 고음질.
+   2순위(폴백): 브라우저 내장 음성(Web Speech). 네트워크/오류 시 자동 전환.   */
+
+// 프록시의 TTS 엔드포인트 (Claude 검색 프록시와 같은 도메인, 경로만 /tts)
+const TTS_URL = "https://jp-vocab-proxy.vercel.app/api/tts";
+
+// 음성 설정(성별/속도/엔진 on-off)은 localStorage에 저장
+const TTS_KEY = "jp-vocab-tts-v1";
+const defaultTtsSettings = { engine: "google", gender: "random", rate: 0.95 };
+function loadTtsSettings() {
+  try {
+    const raw = localStorage.getItem(TTS_KEY);
+    if (!raw) return { ...defaultTtsSettings };
+    return { ...defaultTtsSettings, ...JSON.parse(raw) };
+  } catch { return { ...defaultTtsSettings }; }
+}
+function saveTtsSettings(s) {
+  try { localStorage.setItem(TTS_KEY, JSON.stringify(s)); } catch {}
+}
+// 현재 설정을 모듈 전역에 보관(설정 UI가 갱신, speak가 참조)
+let ttsSettings = (typeof window !== "undefined") ? loadTtsSettings() : { ...defaultTtsSettings };
+function setTtsSettings(next) { ttsSettings = next; saveTtsSettings(next); }
+
+// 같은 텍스트+설정 조합은 캐시해서 재호출/지연을 줄임
+const ttsCache = new Map(); // key -> objectURL
+let currentAudio = null;
+
+function cacheKey(text, s) {
+  return [text, s.gender, s.rate].join("|");
+}
+
+async function fetchGoogleAudio(text, s) {
+  const key = cacheKey(text, s);
+  if (ttsCache.has(key)) return ttsCache.get(key);
+  const r = await fetch(TTS_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, gender: s.gender, rate: s.rate }),
+  });
+  if (!r.ok) throw new Error("tts http " + r.status);
+  const data = await r.json();
+  if (!data || !data.audio) throw new Error("no audio");
+  // base64 mp3 -> blob -> objectURL
+  const bin = atob(data.audio);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([bytes], { type: "audio/mpeg" }));
+  ttsCache.set(key, url);
+  return url;
+}
+
+function stopAudio() {
+  if (currentAudio) { try { currentAudio.pause(); } catch {} currentAudio = null; }
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+}
+
+/* 통합 speak: 설정에 따라 Google 우선, 실패하면 내장 음성으로 폴백 */
+function speakSmart(text, voiceRef, onState) {
+  if (!text) return;
+  stopAudio();
+  const s = ttsSettings;
+  if (s.engine === "browser") { speak(text, voiceRef, onState); return; }
+  onState && onState("loading");
+  fetchGoogleAudio(text, s).then((url) => {
+    const audio = new Audio(url);
+    currentAudio = audio;
+    audio.playbackRate = 1; // 속도는 서버에서 speakingRate로 이미 반영
+    audio.onplay = () => onState && onState("playing");
+    audio.onended = () => { onState && onState("idle"); if (currentAudio === audio) currentAudio = null; };
+    audio.onerror = () => { onState && onState("idle"); speak(text, voiceRef, onState); };
+    audio.play().catch(() => { onState && onState("idle"); speak(text, voiceRef, onState); });
+  }).catch(() => {
+    // 구글 실패 → 내장 음성 폴백
+    speak(text, voiceRef, onState);
+  });
+}
+
 function useJaVoice() {
   const voiceRef = useRef(null);
   useEffect(() => {
@@ -177,12 +252,20 @@ function wordSpeech(card) {
 }
 
 /* 예문 발음용 텍스트: 화면에 보이는 요미가나(토큰 읽기)를 그대로 읽도록 구성.
-   한자 토큰은 r(읽기)로, 가나 토큰은 t 그대로 이어붙인다. 이러면 화면 후리가나와
-   음성이 100% 일치한다. (厄介者·騙し取る 같은 불일치 방지) */
+   한자 토큰은 r(읽기)로, 가나 토큰은 t 그대로 이어붙인다. 화면 후리가나와 100% 일치.
+   추가로, 한자(내용어) 토큰 앞에 가는 공백을 넣어 음성엔진이 어절을 끊어 읽게 해
+   장음이 다음 단어에 붙는 등의 어색함을 줄인다. */
 function exampleSpeech(ex) {
   if (!ex) return "";
   if (ex.tokens && ex.tokens.length) {
-    return ex.tokens.map((t) => (t.r ? t.r : t.t)).join("");
+    let out = "";
+    ex.tokens.forEach((t, i) => {
+      const reading = t.r ? t.r : t.t;
+      // 한자에서 온 토큰(내용어 시작)이면 앞에 공백을 넣어 어절 분리(첫 토큰 제외)
+      if (i > 0 && t.r) out += " ";
+      out += reading;
+    });
+    return out;
   }
   if (ex.ja) return ex.ja;
   return "";
@@ -618,7 +701,7 @@ function FlashCard({ card, isNew, voiceRef, onToggleStar, starred }) {
           </div>
           <button
             className={"word" + (speaking === "playing" ? " word-playing" : "")}
-            onClick={() => speak(wordSpeech(card), voiceRef, setSpeaking)}
+            onClick={() => speakSmart(wordSpeech(card), voiceRef, setSpeaking)}
             title="발음 듣기"
           >
             {card.word}
@@ -633,7 +716,7 @@ function FlashCard({ card, isNew, voiceRef, onToggleStar, starred }) {
             <div className="divider" />
             <button
               className="example"
-              onClick={() => speak(exampleSpeech(ex), voiceRef)}
+              onClick={() => speakSmart(exampleSpeech(ex), voiceRef)}
               title="예문 발음 듣기"
             >
               <span className="example-ja">
@@ -685,6 +768,8 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
   const swipe = useRef({ x: 0, y: 0, active: false });
   const [drag, setDrag] = useState(0);
   const [leaving, setLeaving] = useState(0);
+  const [enterFrom, setEnterFrom] = useState(0); // 새 카드가 들어오는 시작 방향(-1 좌/1 우)
+  const [enterSnap, setEnterSnap] = useState(false); // true인 프레임엔 트랜지션 끔(즉시 화면밖 배치)
 
   const s = session || { queue: [], pos: 0, doneCount: 0, total: 0, extraLimit: NEW_PER_DAY, done: false, dismissed: false };
   const currentId = s.queue[s.pos];
@@ -725,8 +810,20 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
 
   const triggerGrade = (known, animate) => {
     if (animate) {
-      setLeaving(known ? 1 : -1);
-      setTimeout(() => { setLeaving(0); advance(known); }, 200);
+      const exitDir = known ? 1 : -1;      // 알고있음=오른쪽으로 퇴장, 다시학습=왼쪽
+      setLeaving(exitDir);
+      setTimeout(() => {
+        // 이전 카드는 화면 밖으로 나갔고, 새 카드는 반대편에서 등장
+        setEnterSnap(true);        // 이 프레임은 트랜지션 없이 화면 밖에 즉시 배치
+        setEnterFrom(-exitDir);
+        setLeaving(0);
+        advance(known);
+        // 다음 프레임: 트랜지션 켜고 가운데(0)로 슬라이드 인
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          setEnterSnap(false);
+          setEnterFrom(0);
+        }));
+      }, 200);
     } else {
       advance(known); // 버튼 채점: 모션 없음
     }
@@ -870,7 +967,8 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
   const pct = total > 0 ? Math.round((s.doneCount / total) * 100) : 0;
 
   const dragOut = leaving !== 0;
-  const tx = dragOut ? leaving * 600 : drag;
+  const entering = enterFrom !== 0;
+  const tx = dragOut ? leaving * 600 : (entering ? enterFrom * 600 : drag);
   const opacity = dragOut ? 0 : 1 - Math.min(Math.abs(drag) / 700, 0.2);
 
   return (
@@ -895,9 +993,11 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
         style={{
           transform: `translateX(${tx}px)`,
           opacity,
-          transition: (drag === 0 || dragOut)
-            ? "transform .28s cubic-bezier(.25,.1,.25,1), opacity .28s ease"
-            : "none",
+          transition: enterSnap
+            ? "none"
+            : ((drag === 0 || dragOut || entering)
+              ? "transform .28s cubic-bezier(.25,.1,.25,1), opacity .28s ease"
+              : "none"),
         }}
       >
         {drag <= -40 && <div className="swipe-tag swipe-again">다시 학습</div>}
@@ -1040,7 +1140,7 @@ function AddView({ cards, setCards, voiceRef }) {
               <input className="input" value={form.word}
                 onChange={(e) => setForm({ ...form, word: e.target.value })} />
               {form.word && (
-                <button className="spk-btn" onClick={() => speak(wordSpeech({ word: form.word, reading: form.reading, hasKanji: hasKanji(form.word) }), voiceRef)}>
+                <button className="spk-btn" onClick={() => speakSmart(wordSpeech({ word: form.word, reading: form.reading, hasKanji: hasKanji(form.word) }), voiceRef)}>
                   <Icon.Speaker />
                 </button>
               )}
@@ -1071,7 +1171,7 @@ function AddView({ cards, setCards, voiceRef }) {
               placeholder="예문이 비어 있으면 '다시 생성'을 누르거나 직접 입력"
               onChange={(e) => setForm({ ...form, exJa: e.target.value })} />
             {form.exJa && (
-              <button className="ex-preview" onClick={() => speak(exampleSpeech({ tokens: previewTokens, ja: form.exJa }), voiceRef)}>
+              <button className="ex-preview" onClick={() => speakSmart(exampleSpeech({ tokens: previewTokens, ja: form.exJa }), voiceRef)}>
                 <span className="ex-preview-ja"><FuriganaText tokens={previewTokens} showFuri={true} /></span>
                 <span className="ex-preview-hint">미리듣기 · 후리가나 적용됨</span>
               </button>
@@ -1193,7 +1293,7 @@ function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, onDele
               {card.hasKanji && card.reading && (
                 <div className="modal-furi">{card.reading}</div>
               )}
-              <button className="modal-word" onClick={() => speak(wordSpeech(card), voiceRef)}>
+              <button className="modal-word" onClick={() => speakSmart(wordSpeech(card), voiceRef)}>
                 {card.word}
               </button>
               <div className="modal-meaning">{card.meaning}</div>
@@ -1201,7 +1301,7 @@ function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, onDele
               <div className="modal-divider" />
 
               {ex.tokens && ex.tokens.length > 0 ? (
-                <button className="modal-example" onClick={() => speak(exampleSpeech(ex), voiceRef)}>
+                <button className="modal-example" onClick={() => speakSmart(exampleSpeech(ex), voiceRef)}>
                   <span className="modal-ex-ja">
                     <FuriganaText tokens={ex.tokens} showFuri={true} />
                   </span>
@@ -1809,7 +1909,71 @@ function StatsView({ cards, timeLog, quizLog, setCards, setTimeLog, setQuizLog }
 
       <StudyCalendar cards={cards} quizLog={quizLog} />
 
+      <VoiceSettings />
+
       <BackupBox cards={cards} timeLog={timeLog} setCards={setCards} setTimeLog={setTimeLog} />
+    </div>
+  );
+}
+
+/* 음성 설정: 엔진(고음질/내장), 성별, 속도. 미리듣기 버튼 포함 */
+function VoiceSettings() {
+  const [s, setS] = useState(ttsSettings);
+  const [testState, setTestState] = useState("idle");
+  const voiceRef = useRef(null);
+
+  const update = (patch) => {
+    const next = { ...s, ...patch };
+    setS(next);
+    setTtsSettings(next); // 전역 + localStorage 반영
+  };
+
+  const preview = () => {
+    // 미리듣기 예문(요미가나 그대로)
+    speakSmart("日本語の発音を確認します。", voiceRef, setTestState);
+  };
+
+  return (
+    <div className="voice-box">
+      <div className="voice-title">음성 설정</div>
+
+      <div className="voice-row">
+        <span className="voice-label">음질</span>
+        <div className="seg">
+          <button className={"seg-btn" + (s.engine === "google" ? " on" : "")}
+            onClick={() => update({ engine: "google" })}>고음질</button>
+          <button className={"seg-btn" + (s.engine === "browser" ? " on" : "")}
+            onClick={() => update({ engine: "browser" })}>기기 내장</button>
+        </div>
+      </div>
+
+      <div className="voice-row">
+        <span className="voice-label">성별</span>
+        <div className="seg">
+          <button className={"seg-btn" + (s.gender === "female" ? " on" : "")}
+            onClick={() => update({ gender: "female" })}>여성</button>
+          <button className={"seg-btn" + (s.gender === "male" ? " on" : "")}
+            onClick={() => update({ gender: "male" })}>남성</button>
+          <button className={"seg-btn" + (s.gender === "random" ? " on" : "")}
+            onClick={() => update({ gender: "random" })}>랜덤</button>
+        </div>
+      </div>
+
+      <div className="voice-row">
+        <span className="voice-label">속도</span>
+        <div className="voice-rate">
+          <input type="range" min="0.5" max="1.5" step="0.05" value={s.rate}
+            onChange={(e) => update({ rate: Number(e.target.value) })} />
+          <span className="voice-rate-val">{s.rate.toFixed(2)}x</span>
+        </div>
+      </div>
+
+      <button className="voice-test" onClick={preview} disabled={testState === "loading"}>
+        {testState === "loading" ? "불러오는 중…" : testState === "playing" ? "재생 중…" : "미리듣기"}
+      </button>
+      {s.engine === "google" && (
+        <p className="voice-note">고음질은 인터넷 연결이 필요해요. 성별을 랜덤으로 두면 단어마다 다른 목소리가 나올 수 있어요.</p>
+      )}
     </div>
   );
 }
@@ -2438,6 +2602,26 @@ const CSS = `
 /* 백업 */
 .backup-box { background: var(--surface); border-radius: 18px; padding: 18px;
   margin-top: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.voice-box { background: var(--surface); border-radius: 18px; padding: 18px;
+  margin-top: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.voice-title { font-size: 16px; font-weight: 700; color: var(--ink); margin-bottom: 14px; }
+.voice-row { display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 12px; }
+.voice-label { font-size: 14px; font-weight: 600; color: var(--ink-2); flex-shrink: 0; }
+.seg { display: inline-flex; background: var(--fill); border-radius: 10px; padding: 3px; gap: 2px; }
+.seg-btn { border: none; background: none; padding: 7px 12px; border-radius: 8px;
+  font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.seg-btn.on { background: var(--accent); color: #fff; }
+.voice-rate { display: flex; align-items: center; gap: 10px; flex: 1; max-width: 200px; }
+.voice-rate input[type=range] { flex: 1; accent-color: var(--accent); }
+.voice-rate-val { font-size: 13px; font-weight: 600; color: var(--accent-deep);
+  min-width: 44px; text-align: right; }
+.voice-test { width: 100%; height: 44px; margin-top: 6px; border-radius: 12px;
+  border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent);
+  font-size: 14px; font-weight: 600; cursor: pointer; }
+.voice-test:active { background: var(--accent-30); }
+.voice-test:disabled { opacity: .6; }
+.voice-note { font-size: 12px; color: var(--muted); line-height: 1.6; margin: 10px 0 0; }
 .backup-head { font-size: 16px; font-weight: 700; color: var(--ink); margin-bottom: 6px; }
 .backup-desc { font-size: 13px; color: var(--muted); line-height: 1.6; margin-bottom: 14px; }
 .backup-btns { display: flex; gap: 8px; }
