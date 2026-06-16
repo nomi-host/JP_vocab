@@ -1634,18 +1634,33 @@ function posClass(card) {
   const ja = reading || word;
   const first = meaning.split(/[,/·]/)[0].trim();
 
+  // 표현/문형 (물결·괄호 포함)
   if (/[~～(]/.test(word)) return "expr";
+  if (/^[~～(]/.test(first)) return "expr";
+
+  // i형용사: 일본어가 い로 끝나고 뜻이 형용사 어미
   if (/い$/.test(ja)) {
     if (/(쁘다|프다|싸다|좋다|많다|적다|높다|낮다|길다|짧다|크다|작다|넓다|좁다|깊다|얕다|밝다|어둡다|쉽다|어렵다|같다|다)$/.test(first)) return "adj";
   }
-  if (/[うくぐすつぬぶむる]$/.test(ja) && /다$/.test(first)) return "verb";
+  // 형용사형 어미(명사+롭다/스럽다/답다)
   if (/(롭다|스럽다|답다)$/.test(first)) return "adj";
+
+  // 동사: 일본어가 う단으로 끝나고 뜻이 '다'로 끝남, 또는 '~하다'
+  if (/[うくぐすつぬぶむる]$/.test(ja) && /다$/.test(first)) return "verb";
   if (/하다$/.test(first)) return "verb";
+
+  // 부사: 일본어가 명확히 に로 끝나거나(一向に), 뜻이 부사형일 때.
+  //  (く·と는 명사 읽기에도 흔해 오탐이 많아 제외하고 뜻 기반으로 판단)
+  if (/に$/.test(ja) && !/다$/.test(first)) return "adv";
+  if (/(히|이|리|게|없이|토록|차피|구나|마저|조차)$/.test(first)) return "adv";
+  if (/(전혀|도무지|결코|반드시|아주|매우|몹시|점점|갑자기|드디어|마침내|오히려|차라리|일부러|굳이|여전히|역시|과연|만약|설마|아마|어쩌면|부디|제발|점차|훨씬|한층|더욱|가장|무려|약간|조금|상당히|꽤|대체로|대개|간혹|이따금|종종|자주|늘|항상|결국|마치|시도때도|틈틈|이내|좀처럼|줄곧|문득|언뜻|기꺼이|마지못해|어쩔수)/.test(first)) return "adv";
+
+  // 나머지 형용사형 '다' 처리
   if (/다$/.test(first)) {
     if (/(쁘다|프다|쉽다|어렵다|싶다|같다)$/.test(first)) return "adj";
     return "verb";
   }
-  if (/^[~～(]/.test(first)) return "expr";
+
   return "noun";
 }
 
@@ -2529,6 +2544,7 @@ const CSS = `
   font-size: clamp(34px, 11vw, 48px); font-weight: 700; color: var(--ink);
   letter-spacing: 0.5px; line-height: 1.1;
   padding: 20px; margin: -20px;
+  min-width: 6em; display: inline-flex; align-items: center; justify-content: center;
   font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif; }
 .word-playing { opacity: .55; }
 .word-meaning { font-size: 18px; font-weight: 600; color: var(--ink);
