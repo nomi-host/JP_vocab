@@ -136,6 +136,13 @@ function cacheKey(text, s) {
   return [text, s.gender, s.rate].join("|");
 }
 
+// kind에 따라 실제 사용할 설정을 만든다. 단어는 항상 1.0x(또렷하게), 예문만 설정 속도 반영.
+function effSettings(kind) {
+  const s = ttsSettings;
+  if (kind === "word") return { ...s, rate: 1.0 };
+  return s;
+}
+
 async function fetchGoogleAudio(text, s) {
   const key = cacheKey(text, s);
   if (ttsCache.has(key)) return ttsCache.get(key);
@@ -147,7 +154,6 @@ async function fetchGoogleAudio(text, s) {
   if (!r.ok) throw new Error("tts http " + r.status);
   const data = await r.json();
   if (!data || !data.audio) throw new Error("no audio");
-  // base64 mp3 -> blob -> objectURL
   const bin = atob(data.audio);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -157,14 +163,14 @@ async function fetchGoogleAudio(text, s) {
 }
 
 /* 미리 불러오기: 재생하지 않고 캐시에만 채워 다음 카드 음성을 즉시 들리게 함 */
-function prefetchAudio(text) {
+function prefetchAudio(text, kind) {
   if (!text) return;
-  if (ttsSettings.engine !== "google") return; // 내장 음성은 미리받기 불필요
-  const s = ttsSettings;
+  if (ttsSettings.engine !== "google") return;
+  const s = effSettings(kind);
   if (s.gender === "random") return; // 랜덤은 매번 목소리가 달라 캐시 효과 없음
   const key = cacheKey(text, s);
   if (ttsCache.has(key)) return;
-  fetchGoogleAudio(text, s).catch(() => {}); // 실패는 조용히 무시(실제 재생 때 폴백)
+  fetchGoogleAudio(text, s).catch(() => {});
 }
 
 function stopAudio() {
@@ -172,24 +178,24 @@ function stopAudio() {
   if (window.speechSynthesis) window.speechSynthesis.cancel();
 }
 
-/* 통합 speak: 설정에 따라 Google 우선, 실패하면 내장 음성으로 폴백 */
-function speakSmart(text, voiceRef, onState) {
+/* 통합 speak: 설정에 따라 Google 우선, 실패하면 내장 음성으로 폴백.
+   kind: "word"(단어, 항상 1.0x) | "example"(예문, 설정 속도) */
+function speakSmart(text, voiceRef, onState, kind) {
   if (!text) return;
   stopAudio();
-  const s = ttsSettings;
-  if (s.engine === "browser") { speak(text, voiceRef, onState); return; }
+  const s = effSettings(kind);
+  if (s.engine === "browser") { speak(text, voiceRef, onState, kind); return; }
   onState && onState("loading");
   fetchGoogleAudio(text, s).then((url) => {
     const audio = new Audio(url);
     currentAudio = audio;
-    audio.playbackRate = 1; // 속도는 서버에서 speakingRate로 이미 반영
+    audio.playbackRate = 1;
     audio.onplay = () => onState && onState("playing");
     audio.onended = () => { onState && onState("idle"); if (currentAudio === audio) currentAudio = null; };
-    audio.onerror = () => { onState && onState("idle"); speak(text, voiceRef, onState); };
-    audio.play().catch(() => { onState && onState("idle"); speak(text, voiceRef, onState); });
+    audio.onerror = () => { onState && onState("idle"); speak(text, voiceRef, onState, kind); };
+    audio.play().catch(() => { onState && onState("idle"); speak(text, voiceRef, onState, kind); });
   }).catch(() => {
-    // 구글 실패 → 내장 음성 폴백
-    speak(text, voiceRef, onState);
+    speak(text, voiceRef, onState, kind);
   });
 }
 
@@ -227,7 +233,7 @@ function useJaVoice() {
   return voiceRef;
 }
 
-function speak(text, voiceRef, onState) {
+function speak(text, voiceRef, onState, kind) {
   const synth = window.speechSynthesis;
   if (!synth) {
     onState && onState("unsupported");
@@ -236,7 +242,8 @@ function speak(text, voiceRef, onState) {
   synth.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.lang = "ja-JP";
-  u.rate = 0.92;
+  // 단어는 또렷하게 기본 속도, 예문은 설정 속도 반영
+  u.rate = kind === "word" ? 1.0 : (ttsSettings.rate || 0.95);
   u.pitch = 1.0;
   if (voiceRef.current) u.voice = voiceRef.current;
   if (onState) {
@@ -254,31 +261,30 @@ function openNaver(word) {
 }
 
 /* 단어 발음용 텍스트: 한자어면 요미가나(히라가나)로 읽어 후리가나와 일치시킴 */
+/* '~'(물결)를 'なになに'로 읽게 치환 (예: ~を禁じ得ない → なになにをきんじえない) */
+function tildeToYomi(s) {
+  return (s || "").replace(/[~～]+/g, "なになに");
+}
 function wordSpeech(card) {
   const clean = card.word.split(/[／/・↔≠\s(]/)[0];
   if (card.hasKanji && card.reading) {
-    return card.reading.split(/[／/・↔≠\s(]/)[0];
+    return tildeToYomi(card.reading.split(/[／/・↔≠\s(]/)[0]);
   }
-  return clean;
+  return tildeToYomi(clean);
 }
 
-/* 예문 발음용 텍스트: 화면에 보이는 요미가나(토큰 읽기)를 그대로 읽도록 구성.
-   한자 토큰은 r(읽기)로, 가나 토큰은 t 그대로 이어붙인다. 화면 후리가나와 100% 일치.
-   추가로, 한자(내용어) 토큰 앞에 가는 공백을 넣어 음성엔진이 어절을 끊어 읽게 해
-   장음이 다음 단어에 붙는 등의 어색함을 줄인다. */
+/* 예문 발음용 텍스트: 화면에 보이는 요미가나(토큰 읽기)를 그대로 이어붙인다.
+   화면 후리가나와 100% 일치. 공백은 넣지 않는다 — 공백을 넣으면 TTS 엔진이
+   조사 は(와)를 단어 시작 '하'로 잘못 읽거나 어절을 잘못 끊는 부작용이 있어,
+   그냥 이어붙이는 편이 엔진 자체 분절로 더 자연스럽다.
+   '~'(물결)는 'なになに'로 읽게 치환한다(예: ~を禁じ得ない → なになにをきんじえない). */
 function exampleSpeech(ex) {
   if (!ex) return "";
   if (ex.tokens && ex.tokens.length) {
-    let out = "";
-    ex.tokens.forEach((t, i) => {
-      const reading = t.r ? t.r : t.t;
-      // 한자에서 온 토큰(내용어 시작)이면 앞에 공백을 넣어 어절 분리(첫 토큰 제외)
-      if (i > 0 && t.r) out += " ";
-      out += reading;
-    });
-    return out;
+    const out = ex.tokens.map((t) => (t.r ? t.r : t.t)).join("");
+    return tildeToYomi(out);
   }
-  if (ex.ja) return ex.ja;
+  if (ex.ja) return tildeToYomi(ex.ja);
   return "";
 }
 
@@ -712,7 +718,7 @@ function FlashCard({ card, isNew, voiceRef, onToggleStar, starred }) {
           </div>
           <button
             className={"word" + (speaking === "playing" ? " word-playing" : "")}
-            onClick={() => speakSmart(wordSpeech(card), voiceRef, setSpeaking)}
+            onClick={() => speakSmart(wordSpeech(card), voiceRef, setSpeaking, "word")}
             title="발음 듣기"
           >
             {card.word}
@@ -727,7 +733,7 @@ function FlashCard({ card, isNew, voiceRef, onToggleStar, starred }) {
             <div className="divider" />
             <button
               className="example"
-              onClick={() => speakSmart(exampleSpeech(ex), voiceRef)}
+              onClick={() => speakSmart(exampleSpeech(ex), voiceRef, null, "example")}
               title="예문 발음 듣기"
             >
               <span className="example-ja">
@@ -766,15 +772,10 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
   const cardsRef = useRef(cards);
   useEffect(() => { cardsRef.current = cards; }, [cards]);
 
-  // 세션이 없으면 새로 구성(탭 전환 시엔 상위 상태가 유지되어 재구성 안 됨)
-  useEffect(() => {
-    if (!session) {
-      const q = buildQueue(cardsRef.current).map((c) => c.id);
-      setSession({ queue: q, pos: 0, doneCount: 0, total: q.length, extraLimit: NEW_PER_DAY, done: false, dismissed: false });
-    }
-  }, [session, setSession]);
+  // 세션을 자동으로 만들지 않는다. '시작 화면'에서 사용자가 직접 시작한다.
+  // (예전엔 진입 즉시 큐를 만들어 다짜고짜 카드가 떴고, 어제 세션이 어정쩡하게 남는 문제가 있었음)
 
-  const [finishImg, setFinishImg] = useState(0);
+  const [finishImg, setFinishImg] = useState(() => Math.floor(Math.random() * FINISH_IMAGES.length));
   const [seconds, setSeconds] = useState(0);
   const swipe = useRef({ x: 0, y: 0, active: false });
   const [drag, setDrag] = useState(0);
@@ -792,9 +793,9 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
     if (!nextId) return;
     const next = cardsRef.current.find((c) => c.id === nextId);
     if (!next) return;
-    prefetchAudio(wordSpeech(next));
+    prefetchAudio(wordSpeech(next), "word");
     const ex = getExample(next);
-    if (ex && ex.tokens && ex.tokens.length) prefetchAudio(exampleSpeech(ex));
+    if (ex && ex.tokens && ex.tokens.length) prefetchAudio(exampleSpeech(ex), "example");
   }, [currentId, s.pos]);
 
   useEffect(() => {
@@ -904,7 +905,7 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
     const q = picked.map((c) => c.id);
     setExtraMsg("");
     setSeconds(0);
-    setSession({ queue: q, pos: 0, doneCount: 0, total: q.length, extraLimit: NEW_PER_DAY, done: false, dismissed: false });
+    setSession({ queue: q, pos: 0, doneCount: 0, total: q.length, extraLimit: NEW_PER_DAY, started: true, done: false, dismissed: false });
   };
 
   // 다시 학습(복습): 이미 학습한 카드를 다시 학습
@@ -916,12 +917,55 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
     }
     setExtraMsg("");
     setSeconds(0);
-    setSession({ queue: q, pos: 0, doneCount: 0, total: q.length, extraLimit: s.extraLimit || NEW_PER_DAY, done: false, dismissed: false });
+    setSession({ queue: q, pos: 0, doneCount: 0, total: q.length, extraLimit: s.extraLimit || NEW_PER_DAY, started: true, done: false, dismissed: false });
+  };
+
+  // 오늘의 학습 시작: 예정된 복습 + 신규 카드로 큐 구성
+  const startToday = () => {
+    const q = buildQueue(cardsRef.current).map((c) => c.id);
+    setExtraMsg("");
+    setSeconds(0);
+    setSession({ queue: q, pos: 0, doneCount: 0, total: q.length, extraLimit: NEW_PER_DAY, started: true, done: false, dismissed: false });
   };
 
   const dismissFinish = () => {
     setSession((prev) => prev ? { ...prev, dismissed: true } : prev);
   };
+
+  // 시작 화면: 세션을 아직 시작하지 않았을 때(다짜고짜 카드 대신 선택지를 보여줌)
+  if (!session || !session.started) {
+    const dueCount = cardsRef.current.filter((c) => !c.suspended && c.introducedOn && isDue(c, Date.now())).length;
+    const newCount = Math.min(freshLeft, Math.max(0, NEW_PER_DAY - introducedToday));
+    const todayTotal = dueCount + newCount;
+    const canContinue = session && session.queue && session.pos < session.queue.length && !session.done;
+    return (
+      <div className="start-screen">
+        <div className="start-card">
+          <img className="start-img" src={FINISH_IMAGES[finishImg]} alt="" />
+          <div className="start-title">오늘의 학습</div>
+          <div className="start-sub">복습 {dueCount}개 · 신규 {newCount}개</div>
+          {extraMsg && <div className="finish-msg" style={{ color: "var(--muted)" }}>{extraMsg}</div>}
+          <button className="start-btn-primary" disabled={todayTotal === 0} onClick={startToday}>
+            {todayTotal === 0 ? "오늘 예정된 학습 완료" : "오늘의 학습하기"}
+          </button>
+          {canContinue && (
+            <button className="start-btn" onClick={() => setSession((p) => ({ ...p, started: true, done: false, dismissed: false }))}>
+              이어서 학습하기 ({session.pos}/{session.total})
+            </button>
+          )}
+          <button className="start-btn" onClick={startReview}>다시 학습하기</button>
+          <div className="start-section-label">새 단어만 학습</div>
+          <div className="start-count-btns">
+            {[10, 20, 30].map((n) => (
+              <button key={n} className="start-count-btn" disabled={freshLeft === 0} onClick={() => startExtra(n)}>
+                {Math.min(n, freshLeft) || n}개
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // 완료 팝업 (아직 닫지 않았을 때만)
   if (session && session.done && !session.dismissed) {
@@ -1162,7 +1206,7 @@ function AddView({ cards, setCards, voiceRef }) {
               <input className="input" value={form.word}
                 onChange={(e) => setForm({ ...form, word: e.target.value })} />
               {form.word && (
-                <button className="spk-btn" onClick={() => speakSmart(wordSpeech({ word: form.word, reading: form.reading, hasKanji: hasKanji(form.word) }), voiceRef)}>
+                <button className="spk-btn" onClick={() => speakSmart(wordSpeech({ word: form.word, reading: form.reading, hasKanji: hasKanji(form.word) }), voiceRef, null, "word")}>
                   <Icon.Speaker />
                 </button>
               )}
@@ -1193,7 +1237,7 @@ function AddView({ cards, setCards, voiceRef }) {
               placeholder="예문이 비어 있으면 '다시 생성'을 누르거나 직접 입력"
               onChange={(e) => setForm({ ...form, exJa: e.target.value })} />
             {form.exJa && (
-              <button className="ex-preview" onClick={() => speakSmart(exampleSpeech({ tokens: previewTokens, ja: form.exJa }), voiceRef)}>
+              <button className="ex-preview" onClick={() => speakSmart(exampleSpeech({ tokens: previewTokens, ja: form.exJa }), voiceRef, null, "example")}>
                 <span className="ex-preview-ja"><FuriganaText tokens={previewTokens} showFuri={true} /></span>
                 <span className="ex-preview-hint">미리듣기 · 후리가나 적용됨</span>
               </button>
@@ -1315,7 +1359,7 @@ function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, onDele
               {card.hasKanji && card.reading && (
                 <div className="modal-furi">{card.reading}</div>
               )}
-              <button className="modal-word" onClick={() => speakSmart(wordSpeech(card), voiceRef)}>
+              <button className="modal-word" onClick={() => speakSmart(wordSpeech(card), voiceRef, null, "word")}>
                 {card.word}
               </button>
               <div className="modal-meaning">{card.meaning}</div>
@@ -1323,7 +1367,7 @@ function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, onDele
               <div className="modal-divider" />
 
               {ex.tokens && ex.tokens.length > 0 ? (
-                <button className="modal-example" onClick={() => speakSmart(exampleSpeech(ex), voiceRef)}>
+                <button className="modal-example" onClick={() => speakSmart(exampleSpeech(ex), voiceRef, null, "example")}>
                   <span className="modal-ex-ja">
                     <FuriganaText tokens={ex.tokens} showFuri={true} />
                   </span>
@@ -2727,6 +2771,24 @@ const CSS = `
   border: 1px solid rgba(255,255,255,.5); background: transparent; color: #fff;
   font-size: 15px; font-weight: 600; cursor: pointer; }
 .empty-section-label { color: var(--ink-2); font-size: 13px; font-weight: 600; margin: 18px 0 8px; }
+/* 시작 화면(흰 배경, 완료카드 레이아웃 차용) */
+.start-screen { display: flex; align-items: flex-start; justify-content: center; padding: 14px 16px 20px; }
+.start-card { width: 100%; max-width: 420px; background: var(--surface);
+  border-radius: 24px; padding: 22px 20px 20px; text-align: center;
+  box-shadow: 0 6px 28px rgba(0,0,0,.08); animation: pop .25s cubic-bezier(.2,.8,.2,1); }
+.start-img { width: 100%; max-width: 200px; border-radius: 18px; display: block; margin: 0 auto 16px; }
+.start-title { color: var(--ink); font-size: 22px; font-weight: 800; letter-spacing: -0.3px; margin-bottom: 6px; }
+.start-sub { color: var(--muted); font-size: 14px; margin-bottom: 18px; }
+.start-btn-primary { width: 100%; height: 52px; border-radius: 14px; border: none;
+  background: var(--accent); color: #fff; font-size: 16px; font-weight: 700; cursor: pointer; margin-bottom: 10px; }
+.start-btn-primary:disabled { opacity: .5; cursor: default; }
+.start-btn { width: 100%; height: 48px; border-radius: 14px; border: 1px solid var(--line);
+  background: var(--fill); color: var(--ink); font-size: 15px; font-weight: 600; cursor: pointer; margin-bottom: 10px; }
+.start-section-label { color: var(--ink-2); font-size: 13px; font-weight: 600; text-align: left; margin: 16px 0 8px; }
+.start-count-btns { display: flex; gap: 8px; }
+.start-count-btn { flex: 1; height: 44px; border-radius: 12px; border: 1px solid var(--accent);
+  background: var(--accent-soft); color: var(--accent); font-size: 15px; font-weight: 700; cursor: pointer; }
+.start-count-btn:disabled { opacity: .5; cursor: default; }
 .empty-count-btns { display: flex; gap: 8px; max-width: 320px; margin: 0 auto; }
 .empty-count-btn { flex: 1; height: 46px; border-radius: 12px; border: none;
   background: var(--accent); color: #fff; font-size: 16px; font-weight: 700; cursor: pointer; }
