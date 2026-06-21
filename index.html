@@ -275,10 +275,26 @@ function openNaver(word) {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
+/* 상용한자(2136자) 밖의 잘 안 쓰이는 한자 집합. 이 한자가 들어간 표제어는
+   화면에 'ひらがな(漢字)' 형태로 보여줘 읽기 편하게 한다. (읽기 음성은 한 번만.) */
+const NON_JOYO_CHARS = "躊躇揶揄贔屓賄賂拵嵌抉撫拭痺憚怯蔑跪噛齧縋拗喋屁弄慄顰綻溺妬嫉曖昧詣窺覗綴撒纏繋眩滲掴";
+function hasNonJoyo(word) {
+  for (const ch of (word || "")) if (NON_JOYO_CHARS.indexOf(ch) >= 0) return true;
+  return false;
+}
+/* 화면 표시용 표제어: 상용외 한자가 있으면 'よみ(漢字)'로, 아니면 원문 그대로. */
+function displayWord(card) {
+  if (card && card.hasKanji && card.reading && hasNonJoyo(card.word)) {
+    return card.reading + "(" + card.word + ")";
+  }
+  return card ? card.word : "";
+}
+
 /* 단어 발음용 텍스트: 한자어면 요미가나(히라가나)로 읽어 후리가나와 일치시킴 */
-/* '~'(물결)를 'なになに'로 읽게 치환 (예: ~を禁じ得ない → なになにをきんじえない) */
+/* '~'(물결, 반각/전각 2종 모두)를 'なになに'로 읽게 치환
+   (예: ~を禁じ得ない / 〜を禁じ得ない → なになにをきんじえない) */
 function tildeToYomi(s) {
-  return (s || "").replace(/[~～]+/g, "なになに");
+  return (s || "").replace(/[~\u301C\uFF5E\u223C]+/g, "なになに");
 }
 function wordSpeech(card) {
   const clean = card.word.split(/[／/・↔≠\s(]/)[0];
@@ -288,15 +304,16 @@ function wordSpeech(card) {
   return tildeToYomi(clean);
 }
 
-/* 예문 발음용 텍스트: 화면에 보이는 요미가나(토큰 읽기)를 그대로 이어붙인다.
-   화면 후리가나와 100% 일치. 공백은 넣지 않는다 — 공백을 넣으면 TTS 엔진이
-   조사 は(와)를 단어 시작 '하'로 잘못 읽거나 어절을 잘못 끊는 부작용이 있어,
-   그냥 이어붙이는 편이 엔진 자체 분절로 더 자연스럽다.
-   '~'(물결)는 'なになに'로 읽게 치환한다(예: ~を禁じ得ない → なになにをきんじえない). */
+/* 예문 발음용 텍스트: 화면 후리가나(토큰 읽기)를 그대로 신뢰해 이어붙인다.
+   (한자 원문을 보내면 의도적으로 다르게 단 후리가나가 무시되므로 토큰을 쓴다.)
+   단, 히라가나만 길게 이어지면 엔진이 단어 경계를 잘못 잡아 오독하므로
+   (예: たちいる→た・ちいる), 토큰 경계에 가느다란 단어 구분 공백을 넣어 완화한다.
+   조사로만 이뤄진 짧은 토큰은 앞 단어에 붙여 자연스러운 호흡을 유지한다. */
 function exampleSpeech(ex) {
   if (!ex) return "";
   if (ex.tokens && ex.tokens.length) {
-    const out = ex.tokens.map((t) => (t.r ? t.r : t.t)).join("");
+    const parts = ex.tokens.map((t) => (t.r ? t.r : t.t));
+    const out = parts.join("\u200b"); // zero-width space로 토큰 경계 힌트
     return tildeToYomi(out);
   }
   if (ex.ja) return tildeToYomi(ex.ja);
@@ -346,14 +363,14 @@ if (typeof window !== "undefined" && window.speechSynthesis) {
 }
 
 // 일본어 텍스트를 끝까지 재생 (google→내장 폴백). resolve로 끝남 알림.
-function playJaAsync(text, voiceRef, ctl) {
+function playJaAsync(text, voiceRef, ctl, kind) {
   return new Promise((resolve) => {
     if (!text || (ctl && ctl.cancelled)) return resolve();
     let done = false;
     const finish = () => { if (!done) { done = true; resolve(); } };
     speakSmart(text, voiceRef, (st) => {
       if (st === "idle" || st === "unsupported") finish();
-    }, "example");
+    }, kind || "example");
     // 안전장치: 너무 길어지면 강제 종료 (max 12초)
     setTimeout(finish, 12000);
   });
@@ -370,17 +387,26 @@ function playKoAsync(text, ctl, enabled) {
       setTimeout(resolve, 600);
       return;
     }
+    // iOS Safari: <audio>(일본어 Google TTS) 재생 직후 speechSynthesis가 무시되는
+    // 버그가 있어, cancel→resume으로 엔진을 깨운 뒤 한 박자 늦게 speak 한다.
     try { synth.cancel(); } catch {}
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "ko-KR";
-    u.voice = voice;
-    u.rate = 1.0;
+    try { synth.resume(); } catch {}
     let done = false;
     const finish = () => { if (!done) { done = true; resolve(); } };
-    u.onend = finish;
-    u.onerror = finish;
-    synth.speak(u);
-    setTimeout(finish, 10000);
+    const speakNow = () => {
+      if (ctl && ctl.cancelled) return finish();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = "ko-KR";
+      u.voice = voice;
+      u.rate = 1.0;
+      u.onend = finish;
+      u.onerror = finish;
+      try { synth.speak(u); } catch { return finish(); }
+      // 일부 환경에서 onstart가 안 와도 멈추지 않도록 안전장치
+      setTimeout(finish, 10000);
+    };
+    // 60ms 지연이 audio→synthesis 전환 안정성을 크게 높인다.
+    setTimeout(speakNow, 60);
   });
 }
 
@@ -667,17 +693,17 @@ function buildWeakQueue(cards, limit) {
 }
 
 /* known=true('알고있음') → box 상승 / false('다시 학습') → box 1로, 세션 내 재노출.
-   복습 간격은 그동안 '다시 학습'(오답) 횟수가 적을수록 길게(망각곡선 가속). */
+   복습 간격(망각곡선): 맞힐수록 box가 오르고 간격이 길어진다.
+   nextReviewDays는 '지금 known으로 채점하면 며칠 뒤'인지 계산하며,
+   표시(grade-sub)와 실제 적용(gradeCard)이 동일한 결과를 내도록
+   '채점 후 box'를 기준으로 일관되게 계산한다. */
+const REVIEW_INTERVALS = [1, 2, 4, 7, 15, 25]; // box 1,2,3,4,5,6+ 일 때의 일수(기존의 약 50%)
 function nextReviewDays(card, known) {
-  // 이 카드를 지금 채점했을 때 다음 복습까지 며칠 뒤인지 계산
-  const wrongs = (card.history || []).filter((h) => h.known === false).length + (known ? 0 : 1);
   if (!known) return 1; // 틀리면 내일 다시
-  // 누적 오답이 적을수록 긴 간격. 0회=30일, 1회=14일, 2회=7일, 3회=3일, 그 이상=1일
-  const byWrong = [30, 14, 7, 3, 1];
-  const base = byWrong[Math.min(wrongs, byWrong.length - 1)];
-  // 같은 단어를 여러 번 맞힐수록 조금씩 더 늘림(box 보너스)
-  const boxBonus = Math.max(0, (card.box || 0) - 1);
-  return base + boxBonus * Math.round(base * 0.5);
+  // 채점 후의 box를 미리 계산(맞히면 +1, 최소 1)
+  const nextBox = Math.min(MAX_BOX, Math.max(1, card.box || 0) + 1);
+  const idx = Math.min(nextBox - 1, REVIEW_INTERVALS.length - 1);
+  return REVIEW_INTERVALS[idx];
 }
 
 function gradeCard(card, known) {
@@ -685,13 +711,15 @@ function gradeCard(card, known) {
   const c = { ...card };
   if (!c.introducedOn) c.introducedOn = today;
   if (known) c.seen += 1; // '알고있음'을 누른 횟수만 학습 횟수로 카운트
-  const days = nextReviewDays(c, known);
+  // 간격은 '채점 후 box' 기준 — 표시와 100% 일치시키기 위해 box를 먼저 올린다.
   c.history = [...c.history, { d: today, known }];
   if (known) {
     c.box = Math.min(MAX_BOX, Math.max(1, c.box) + 1);
   } else {
     c.box = 1;
   }
+  const idx = Math.min(c.box - 1, REVIEW_INTERVALS.length - 1);
+  const days = known ? REVIEW_INTERVALS[idx] : 1;
   c.due = dayStrFrom(Date.now() + days * DAY);
   return c;
 }
@@ -718,8 +746,8 @@ const Icon = {
   ),
   Cards: (p) => (
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" {...p}>
-      <rect x="3" y="6" width="14" height="12" rx="2" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M7 4h12a2 2 0 0 1 2 2v10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <rect x="3" y="8" width="13" height="11" rx="2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M7 6h12a2 2 0 0 1 2 2v9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   ),
   List: (p) => (
@@ -994,9 +1022,8 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession, de
       if (!prev) return prev;
       const queue = prev.queue.slice();
       if (!known) {
-        // '다시 학습' → 큐 뒤쪽으로 충분히 보냄(앞으로 8칸 뒤, 또는 거의 끝)
-        const insertAt = Math.min(queue.length, prev.pos + 8);
-        queue.splice(insertAt, 0, currentId);
+        // '다시 학습' → 남은 카드를 모두 한 바퀴 돈 뒤에 다시 나오도록 큐의 맨 뒤로 보낸다.
+        queue.push(currentId);
       }
       return {
         ...prev,
@@ -1472,7 +1499,7 @@ function ListenView({ cards, voiceRef, decks }) {
         if (ctl.cancelled) return;
         const firstRep = r === 0; // 한국어 뜻은 첫 회차에만 안내
         setPhase("일본어");
-        await playJaAsync(wordSpeech(card), voiceRef, ctl);
+        await playJaAsync(wordSpeech(card), voiceRef, ctl, "word");
         if (ctl.cancelled) return;
         await sleep(350, ctl);
 
@@ -3390,7 +3417,9 @@ function App() {
 const STYLE_VARS = {};
 const CSS = `
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .app {
+  overscroll-behavior-x: none;
   --bg: #f2f2f7;
   --surface: #ffffff;
   --ink: #1c1c1e;
@@ -3537,7 +3566,8 @@ const CSS = `
 .quiz-start-btns { display: flex; flex-direction: column; gap: 12px; }
 .quiz-start { width: 100%; height: 56px; border-radius: 14px; border: none;
   background: var(--accent); color: #fff; font-size: 17px; font-weight: 700; cursor: pointer; }
-.quiz-start-alt { background: var(--accent-soft); color: var(--accent-deep); }
+.quiz-start-alt { background: var(--accent-soft); color: var(--accent-deep);
+  border: 1px solid var(--accent); }
 .quiz-progress-row { display: flex; align-items: center; justify-content: space-between;
   margin: 2px 0 16px; }
 .quiz-progress { font-size: 15px; font-weight: 700; color: var(--ink); }
@@ -3692,11 +3722,12 @@ const CSS = `
 .start-btn-active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .start-section-label { color: var(--ink-2); font-size: 12px; font-weight: 600; text-align: left; margin: 10px 0 6px; }
 .start-count-btns { display: flex; gap: 7px; }
-.start-count-btn { flex: 1; height: 42px; border-radius: 11px; border: 1px solid var(--accent);
-  background: var(--accent-soft); color: var(--accent); font-size: 14px; font-weight: 700; cursor: pointer;
+.start-count-btn { flex: 1; height: 36px; border-radius: 11px; border: 1px solid var(--accent);
+  background: var(--accent-soft); color: var(--accent); font-size: 12.5px; font-weight: 700; cursor: pointer;
   line-height: 1.5; }
 .start-count-btn:disabled { opacity: .5; cursor: default; }
 .start-count-btn.on { background: var(--accent); color: #fff; }
+.start-panel .start-btn-primary { height: 36px; font-size: 12.5px; margin-bottom: 0; }
 /* 선택하여 학습 펼침 패널 */
 .start-panel { margin-top: 4px; padding: 14px; border-radius: 14px;
   background: var(--accent-soft); animation: pop .2s cubic-bezier(.2,.8,.2,1); }
@@ -3713,9 +3744,12 @@ const CSS = `
   background: var(--surface); color: var(--ink); font-size: 14px; padding: 0 12px; cursor: pointer;
   -webkit-appearance: none; appearance: none; }
 /* 단어장 관리 모달 */
-.deck-mgr { max-width: 420px; }
+.deck-mgr { max-width: 420px; padding-top: 18px; }
 .deck-mgr-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .deck-mgr-head h3 { margin: 0; font-size: 18px; font-weight: 800; color: var(--ink); }
+.deck-mgr .modal-x { border: none; background: var(--fill); color: var(--ink-2);
+  width: 40px; height: 40px; border-radius: 50%; font-size: 18px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .deck-new { display: flex; gap: 8px; margin-bottom: 16px; }
 .deck-new .input { flex: 1; }
 .deck-new-btn { height: 44px; padding: 0 16px; border-radius: 12px; border: none;
@@ -3936,7 +3970,7 @@ const CSS = `
 /* 목록 안 '새 단어 등록' 버튼 / 등록 패널 뒤로가기 */
 .list-add-btn { width: 100%; height: 46px; border-radius: 12px; border: none;
   background: var(--accent); color: #fff; font-size: 15px; font-weight: 700;
-  cursor: pointer; margin-bottom: 12px; letter-spacing: .3px; word-break: keep-all; }
+  cursor: pointer; margin-top: 10px; margin-bottom: 12px; letter-spacing: .3px; word-break: keep-all; }
 .add-back { background: none; border: none; color: var(--accent); font-size: 15px;
   font-weight: 600; cursor: pointer; padding: 6px 2px; margin-bottom: 4px; align-self: flex-start; }
 
@@ -3945,18 +3979,18 @@ const CSS = `
 .listen-now { background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
   padding: 28px 22px; text-align: center; min-height: 200px;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.03); margin-bottom: 16px; }
+  box-shadow: 0 2px 10px rgba(0,0,0,0.03); margin-top: 16px; margin-bottom: 16px; }
 .listen-phase { font-size: 12px; font-weight: 700; color: var(--accent);
   background: var(--accent-soft); border-radius: 999px; padding: 4px 14px; margin-bottom: 14px;
   letter-spacing: .5px; line-height: 1.5; }
 .listen-word { font-size: 30px; font-weight: 800; color: var(--ink); line-height: 1.5;
-  word-break: keep-all; }
+  word-break: keep-all; overflow-wrap: anywhere; max-width: 100%; }
 .listen-reading { font-size: 16px; color: var(--ink-2); margin-top: 4px; line-height: 1.5; }
 .listen-meaning { font-size: 17px; color: var(--ink); margin-top: 12px; line-height: 1.6;
-  word-break: keep-all; }
+  word-break: keep-all; overflow-wrap: anywhere; max-width: 100%; }
 .listen-ex { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); width: 100%; }
-.listen-ex-ja { font-size: 15px; color: var(--ink); line-height: 1.7; word-break: keep-all; }
-.listen-ex-ko { font-size: 14px; color: var(--ink-2); margin-top: 6px; line-height: 1.6; word-break: keep-all; }
+.listen-ex-ja { font-size: 15px; color: var(--ink); line-height: 1.7; word-break: keep-all; overflow-wrap: anywhere; }
+.listen-ex-ko { font-size: 14px; color: var(--ink-2); margin-top: 6px; line-height: 1.6; word-break: keep-all; overflow-wrap: anywhere; }
 .listen-progress { font-size: 13px; color: var(--ink-2); margin-top: 10px; }
 .listen-phase-row { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap;
   margin-bottom: 16px; }
