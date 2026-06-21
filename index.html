@@ -483,6 +483,7 @@ function initCard(w) {
     starred: false,
     history: [],
     fromSeed: w.fromSeed !== undefined ? w.fromSeed : true, // 기본 단어 출신 여부
+    decks: w.decks || [],    // 사용자 단어장 id 목록(여러 개 가능)
   };
 }
 
@@ -533,6 +534,16 @@ function buildReviewQueue(cards, limit) {
   const seed = (today.split("-").join("") | 0) ^ 0x5bd1e995;
   const pool = cards.filter((c) => !c.suspended && c.introducedOn);
   const lim = typeof limit === "number" ? limit : NEW_PER_DAY;
+  return seededShuffle(pool, seed).slice(0, lim);
+}
+
+/* 카테고리/단어장 학습 큐: 지정한 필터(품사 키 또는 deckId)에 속한 카드를
+   due 무시하고 모아 학습. limit개로 제한. */
+function buildCategoryQueue(cards, filterFn, limit) {
+  const today = todayStr();
+  const seed = (today.split("-").join("") | 0) ^ 0x27d4eb2f;
+  const pool = cards.filter((c) => !c.suspended && filterFn(c));
+  const lim = typeof limit === "number" ? limit : pool.length;
   return seededShuffle(pool, seed).slice(0, lim);
 }
 
@@ -779,7 +790,7 @@ function FlashCard({ card, isNew, voiceRef, onToggleStar, starred }) {
 }
 
 /* ===================== 학습 뷰 ===================== */
-function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) {
+function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession, decks }) {
   const cardsRef = useRef(cards);
   useEffect(() => { cardsRef.current = cards; }, [cards]);
 
@@ -903,6 +914,8 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
   const freshLeft = cards.filter((c) => !c.suspended && !c.introducedOn).length;
 
   const [extraMsg, setExtraMsg] = useState("");
+  const [catSel, setCatSel] = useState(""); // 선택한 카테고리/덱
+  const [catCount, setCatCount] = useState(20); // 학습 횟수
 
   // 새 단어 학습: N개만큼 신규 카드를 추가로 학습 (10개 단위 선택)
   const startExtra = (count) => {
@@ -939,6 +952,29 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
     setSession({ queue: q, pos: 0, doneCount: 0, total: q.length, extraLimit: NEW_PER_DAY, started: true, done: false, dismissed: false });
   };
 
+  // 카테고리/단어장 학습: 품사 키('pos:noun') 또는 덱('deck:<id>')
+  const startCategory = (sel, count) => {
+    let filterFn;
+    if (sel.startsWith("pos:")) {
+      const key = sel.slice(4);
+      filterFn = (c) => posClass(c) === key;
+    } else if (sel.startsWith("deck:")) {
+      const id = sel.slice(5);
+      filterFn = (c) => (c.decks || []).includes(id);
+    } else {
+      return;
+    }
+    const picked = buildCategoryQueue(cardsRef.current, filterFn, count);
+    if (picked.length === 0) {
+      setExtraMsg("이 분류에 학습할 단어가 없어요.");
+      return;
+    }
+    const q = picked.map((c) => c.id);
+    setExtraMsg("");
+    setSeconds(0);
+    setSession({ queue: q, pos: 0, doneCount: 0, total: q.length, extraLimit: NEW_PER_DAY, started: true, done: false, dismissed: false });
+  };
+
   const dismissFinish = () => {
     setSession((prev) => prev ? { ...prev, dismissed: true } : prev);
   };
@@ -956,14 +992,14 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
           <div className="start-title">오늘의 학습</div>
           <div className="start-sub">복습 {dueCount}개 · 신규 {newCount}개</div>
           {extraMsg && <div className="finish-msg" style={{ color: "var(--muted)" }}>{extraMsg}</div>}
-          <button className="start-btn-primary" disabled={todayTotal === 0} onClick={startToday}>
-            {todayTotal === 0 ? "오늘 예정된 학습 완료" : "오늘의 학습하기"}
-          </button>
           {canContinue && (
-            <button className="start-btn" onClick={() => setSession((p) => ({ ...p, started: true, done: false, dismissed: false }))}>
+            <button className="start-btn-primary" onClick={() => setSession((p) => ({ ...p, started: true, done: false, dismissed: false }))}>
               이어서 학습하기 ({session.pos}/{session.total})
             </button>
           )}
+          <button className={canContinue ? "start-btn" : "start-btn-primary"} disabled={todayTotal === 0} onClick={startToday}>
+            {todayTotal === 0 ? "오늘 예정된 학습 완료" : "오늘의 학습하기"}
+          </button>
           <button className="start-btn" onClick={startReview}>다시 학습하기</button>
           <div className="start-section-label">새 단어만 학습</div>
           <div className="start-count-btns">
@@ -973,6 +1009,36 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession }) 
               </button>
             ))}
           </div>
+
+          <div className="start-section-label">카테고리별 학습</div>
+          <select className="start-select" value={catSel} onChange={(e) => setCatSel(e.target.value)}>
+            <option value="">분류 선택…</option>
+            <optgroup label="품사">
+              {POS_CATEGORIES.map((p) => {
+                const n = cardsRef.current.filter((c) => !c.suspended && posClass(c) === p.key).length;
+                return <option key={p.key} value={"pos:" + p.key}>{p.label} ({n})</option>;
+              })}
+            </optgroup>
+            {decks && decks.length > 0 && (
+              <optgroup label="내 단어장">
+                {decks.map((d) => {
+                  const n = cardsRef.current.filter((c) => (c.decks || []).includes(d.id)).length;
+                  return <option key={d.id} value={"deck:" + d.id}>{d.name} ({n})</option>;
+                })}
+              </optgroup>
+            )}
+          </select>
+          <div className="start-count-btns" style={{ marginTop: 8 }}>
+            {[10, 20, 30, 50].map((n) => (
+              <button key={n} className={"start-count-btn" + (catCount === n ? " on" : "")} onClick={() => setCatCount(n)}>
+                {n}개
+              </button>
+            ))}
+          </div>
+          <button className="start-btn" style={{ marginTop: 10 }} disabled={!catSel}
+            onClick={() => startCategory(catSel, catCount)}>
+            선택한 분류 학습하기
+          </button>
         </div>
       </div>
     );
@@ -1294,7 +1360,7 @@ function statusKind(c) {
   return "learning";
 }
 
-function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, onDelete, voiceRef }) {
+function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, onDelete, voiceRef, decks, onToggleDeck, onCreateDeck }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(null);
 
@@ -1395,6 +1461,29 @@ function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, onDele
                   상태 <b>{card.suspended ? "다시 학습 안 함" : card.introducedOn ? "학습 중" : "미학습"}</b>
                 </span>
               </div>
+
+              <div className="modal-decks">
+                <div className="modal-decks-head">
+                  <span>품사 <b>{POS_LABEL[posClass(card)] || "기타"}</b></span>
+                </div>
+                <div className="modal-decks-label">단어장에 담기</div>
+                <div className="modal-deck-chips">
+                  {(decks || []).map((d) => {
+                    const on = (card.decks || []).includes(d.id);
+                    return (
+                      <button key={d.id}
+                        className={"deck-chip" + (on ? " on" : "")}
+                        onClick={() => onToggleDeck(card.id, d.id)}>
+                        {on ? "✓ " : ""}{d.name}
+                      </button>
+                    );
+                  })}
+                  <button className="deck-chip deck-chip-add" onClick={() => {
+                    const nm = prompt("새 단어장 이름");
+                    if (nm) { const id = onCreateDeck(nm); if (id) onToggleDeck(card.id, id); }
+                  }}>＋ 새 단어장</button>
+                </div>
+              </div>
             </div>
 
             <div className="modal-actions">
@@ -1458,11 +1547,14 @@ function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, onDele
   );
 }
 
-function ListView({ cards, setCards, voiceRef }) {
+function ListView({ cards, setCards, voiceRef, decks, setDecks }) {
   const [q, setQ] = useState("");
   const [openId, setOpenId] = useState(null);
   const [flt, setFlt] = useState("all");   // all/new/learning/done/fav/weak
   const [sort, setSort] = useState("recent"); // recent/kana/seen
+  const [posFlt, setPosFlt] = useState("all"); // 품사: all/noun/verb/adj/adv/expr
+  const [deckFlt, setDeckFlt] = useState("all"); // 단어장: all 또는 deckId
+  const [showDeckMgr, setShowDeckMgr] = useState(false);
   const counts = useMemo(() => {
     let fav = 0, weak = 0;
     for (const c of cards) { if (c.starred) fav++; if (isWeak(c)) weak++; }
@@ -1481,17 +1573,17 @@ function ListView({ cards, setCards, voiceRef }) {
     else if (flt === "new") base = base.filter((c) => statusKind(c) === "new");
     else if (flt === "learning") base = base.filter((c) => statusKind(c) === "learning");
     else if (flt === "done") base = base.filter((c) => statusKind(c) === "done");
+    if (posFlt !== "all") base = base.filter((c) => posClass(c) === posFlt);
+    if (deckFlt !== "all") base = base.filter((c) => (c.decks || []).includes(deckFlt));
 
     const kanaKey = (c) => c.reading || c.word;
     return base
       .map((c, i) => ({ c, i }))
       .sort((a, b) => {
-        // 즐겨찾기는 항상 위로
         const fa = a.c.starred ? 1 : 0, fb = b.c.starred ? 1 : 0;
         if (fa !== fb) return fb - fa;
         if (sort === "kana") return kanaKey(a.c).localeCompare(kanaKey(b.c), "ja");
         if (sort === "seen") return (b.c.seen || 0) - (a.c.seen || 0);
-        // recent(등록순): 사용자가 추가한 단어를 맨 위로, 그다음 seq 내림차순
         const ua = a.c.fromSeed === false ? 1 : 0, ub = b.c.fromSeed === false ? 1 : 0;
         if (ua !== ub) return ub - ua;
         const sa = a.c.seq, sb = b.c.seq;
@@ -1501,7 +1593,33 @@ function ListView({ cards, setCards, voiceRef }) {
         return sb - sa;
       })
       .map((x) => x.c);
-  }, [q, cards, flt, sort]);
+  }, [q, cards, flt, sort, posFlt, deckFlt]);
+
+  // 단어장 관리
+  const createDeck = (name) => {
+    const nm = (name || "").trim();
+    if (!nm) return null;
+    const id = "deck_" + uid();
+    setDecks((prev) => [...prev, { id, name: nm }]);
+    return id;
+  };
+  const renameDeck = (id, name) => {
+    const nm = (name || "").trim();
+    if (!nm) return;
+    setDecks((prev) => prev.map((d) => (d.id === id ? { ...d, name: nm } : d)));
+  };
+  const deleteDeck = (id) => {
+    setDecks((prev) => prev.filter((d) => d.id !== id));
+    setCards((prev) => prev.map((c) => (c.decks && c.decks.includes(id) ? { ...c, decks: c.decks.filter((x) => x !== id) } : c)));
+    if (deckFlt === id) setDeckFlt("all");
+  };
+  const toggleCardDeck = (cardId, deckId) => {
+    setCards((prev) => prev.map((c) => {
+      if (c.id !== cardId) return c;
+      const cur = c.decks || [];
+      return { ...c, decks: cur.includes(deckId) ? cur.filter((x) => x !== deckId) : [...cur, deckId] };
+    }));
+  };
 
   const suspend = (id) => {
     setCards((prev) => prev.map((c) => (c.id === id ? { ...c, suspended: true } : c)));
@@ -1570,6 +1688,21 @@ function ListView({ cards, setCards, voiceRef }) {
         <button className={"list-chip" + (flt === "done" ? " on" : "")} onClick={() => setFlt("done")}>완료</button>
       </div>
 
+      <div className="list-chips">
+        <button className={"list-chip" + (posFlt === "all" ? " on" : "")} onClick={() => setPosFlt("all")}>품사 전체</button>
+        {POS_CATEGORIES.map((p) => (
+          <button key={p.key} className={"list-chip" + (posFlt === p.key ? " on" : "")} onClick={() => setPosFlt(p.key)}>{p.label}</button>
+        ))}
+      </div>
+
+      <div className="list-chips">
+        <button className={"list-chip" + (deckFlt === "all" ? " on" : "")} onClick={() => setDeckFlt("all")}>단어장 전체</button>
+        {decks.map((d) => (
+          <button key={d.id} className={"list-chip" + (deckFlt === d.id ? " on" : "")} onClick={() => setDeckFlt(d.id)}>{d.name}</button>
+        ))}
+        <button className="list-chip list-chip-add" onClick={() => setShowDeckMgr(true)}>＋ 관리</button>
+      </div>
+
       <div className="list-sort">
         <span className="list-sort-label">정렬</span>
         {[["recent", "등록순"], ["kana", "가나다순"], ["seen", "학습횟수"]].map(([k, label]) => (
@@ -1627,7 +1760,58 @@ function ListView({ cards, setCards, voiceRef }) {
         onSave={saveEdit}
         onDelete={deleteCard}
         voiceRef={voiceRef}
+        decks={decks}
+        onToggleDeck={toggleCardDeck}
+        onCreateDeck={createDeck}
       />
+
+      {showDeckMgr && (
+        <DeckManager
+          decks={decks}
+          cards={cards}
+          onClose={() => setShowDeckMgr(false)}
+          onCreate={createDeck}
+          onRename={renameDeck}
+          onDelete={deleteDeck}
+        />
+      )}
+    </div>
+  );
+}
+
+/* 단어장 관리 모달: 생성·이름변경·삭제 */
+function DeckManager({ decks, cards, onClose, onCreate, onRename, onDelete }) {
+  const [newName, setNewName] = useState("");
+  const countFor = (id) => cards.filter((c) => (c.decks || []).includes(id)).length;
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal deck-mgr" onClick={(e) => e.stopPropagation()}>
+        <div className="deck-mgr-head">
+          <h3>내 단어장</h3>
+          <button className="modal-x" onClick={onClose} aria-label="닫기">✕</button>
+        </div>
+        <div className="deck-new">
+          <input className="input" placeholder="새 단어장 이름 (예: N1 문법)"
+            value={newName} onChange={(e) => setNewName(e.target.value)} />
+          <button className="deck-new-btn" onClick={() => { if (onCreate(newName)) setNewName(""); }}>만들기</button>
+        </div>
+        <div className="deck-list">
+          {decks.length === 0 && <div className="deck-empty">아직 단어장이 없어요. 위에서 만들어보세요.</div>}
+          {decks.map((d) => (
+            <div className="deck-item" key={d.id}>
+              <span className="deck-item-name">{d.name}</span>
+              <span className="deck-item-count">{countFor(d.id)}개</span>
+              <button className="deck-item-btn" onClick={() => {
+                const nm = prompt("단어장 이름 변경", d.name);
+                if (nm != null) onRename(d.id, nm);
+              }}>이름</button>
+              <button className="deck-item-btn deck-item-del" onClick={() => {
+                if (confirm(`'${d.name}' 단어장을 삭제할까요?\n단어 자체는 삭제되지 않고, 이 단어장에서만 빠집니다.`)) onDelete(d.id);
+              }}>삭제</button>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1683,12 +1867,31 @@ function quizSubjectPool(cards) {
 }
 
 // 한국어 뜻으로 품사 대략 분류: 동사/형용사(다로 끝남) vs 명사 vs 기타
+/* 의성어·의태어 판별 */
+function isMimetic(word, reading, firstMeaning) {
+  const fk = (s) => (s || "").split(/[・/]/)[0];
+  const redup = (s) => { s = fk(s); const n = s.length; return n >= 4 && n % 2 === 0 && s.slice(0, n / 2) === s.slice(n / 2); };
+  const hasKanji = /[\u4e00-\u9fff]/.test(fk(word));
+  if ((redup(word) || redup(reading)) && !hasKanji) return true;
+  // 한국어 뜻이 2~3글자 반복(끈적끈적, 두리번두리번, 소곤소곤)
+  const m = (firstMeaning || "").split(/[,/·(]/)[0].trim();
+  for (const u of [2, 3]) {
+    if (m.length === u * 2 && m.slice(0, u) === m.slice(u)) return true;
+  }
+  return false;
+}
+
 function posClass(card) {
   const meaning = typeof card === "string" ? card : (card && card.meaning) || "";
   const word = typeof card === "string" ? "" : (card && card.word) || "";
   const reading = typeof card === "string" ? "" : (card && card.reading) || "";
   const ja = reading || word;
   const first = meaning.split(/[,/·]/)[0].trim();
+
+  // 의성어·의태어(オノマトペ): 다른 품사보다 먼저 판정
+  //  - 일본어가 같은 음 반복형(ドキドキ·ふわふわ)이고 한자가 없을 때
+  //  - 또는 한국어 뜻이 반복형 의태 표현(끈적끈적·두리번두리번·소곤소곤)일 때
+  if (isMimetic(word, reading, first)) return "mimetic";
 
   // 표현/문형 (물결·괄호 포함)
   if (/[~～(]/.test(word)) return "expr";
@@ -2343,6 +2546,30 @@ function saveCards(cards) {
   }
 }
 
+/* ===== 단어장(덱) 저장: [{id, name}] ===== */
+const DECK_KEY = "jp-vocab-decks-v1";
+function loadDecks() {
+  try {
+    const raw = localStorage.getItem(DECK_KEY);
+    if (raw) return JSON.parse(raw) || [];
+  } catch (e) {}
+  return [];
+}
+function saveDecks(decks) {
+  try { localStorage.setItem(DECK_KEY, JSON.stringify(decks)); } catch (e) {}
+}
+
+/* 품사 자동 분류 카테고리(저장 없이 posClass로 계산) */
+const POS_CATEGORIES = [
+  { key: "noun", label: "명사" },
+  { key: "verb", label: "동사" },
+  { key: "adj", label: "형용사" },
+  { key: "adv", label: "부사" },
+  { key: "mimetic", label: "의성·의태어" },
+  { key: "expr", label: "표현" },
+];
+const POS_LABEL = { noun: "명사", verb: "동사", adj: "형용사", adv: "부사", mimetic: "의성·의태어", expr: "표현" };
+
 /* 날짜별 학습 시간(초) 로그: { "YYYY-MM-DD": sec } */
 const TIME_KEY = "jp-vocab-timelog-v1";
 function loadTimeLog() {
@@ -2380,7 +2607,11 @@ function loadSession() {
     const obj = JSON.parse(raw);
     // 오늘 날짜의 세션만 복원(어제 세션은 폐기 → 새로 구성)
     if (!obj || obj.date !== todayStr()) return null;
-    return obj.session || null;
+    const sess = obj.session || null;
+    if (!sess) return null;
+    // 앱을 다시 켜면 항상 시작 화면부터 보이도록 started를 해제한다.
+    // 진행 상황(queue/pos)은 그대로 보존되어 '이어서 학습하기'로 이어진다.
+    return { ...sess, started: false, done: false };
   } catch (e) { return null; }
 }
 function saveSession(session) {
@@ -2415,7 +2646,10 @@ function App() {
   const [version, setVersion] = useState(1);
   const [timeLog, setTimeLog] = useState(loadTimeLog);
   const [quizLog, setQuizLog] = useState(loadQuizLog);
+  const [decks, setDecks] = useState(loadDecks);
   const voiceRef = useJaVoice();
+
+  useEffect(() => { saveDecks(decks); }, [decks]);
 
   // 세션 변경 시 저장
   useEffect(() => {
@@ -2480,9 +2714,9 @@ function App() {
         </div>
 
         <main className="content">
-          {tab === "study" && <StudyView cards={cards} setCards={setCards} voiceRef={voiceRef} timeLog={timeLog} session={studySession} setSession={setStudySession} />}
+          {tab === "study" && <StudyView cards={cards} setCards={setCards} voiceRef={voiceRef} timeLog={timeLog} session={studySession} setSession={setStudySession} decks={decks} />}
           {tab === "add" && <AddView cards={cards} setCards={setCards} voiceRef={voiceRef} />}
-          {tab === "list" && <ListView cards={cards} setCards={setCards} voiceRef={voiceRef} />}
+          {tab === "list" && <ListView cards={cards} setCards={setCards} voiceRef={voiceRef} decks={decks} setDecks={setDecks} />}
           {tab === "quiz" && <QuizView cards={cards} setCards={setCards} setQuizLog={setQuizLog} />}
           {tab === "stats" && <StatsView cards={cards} timeLog={timeLog} quizLog={quizLog} setCards={setCards} setTimeLog={setTimeLog} setQuizLog={setQuizLog} />}
         </main>
@@ -2802,6 +3036,38 @@ const CSS = `
 .start-count-btn { flex: 1; height: 44px; border-radius: 12px; border: 1px solid var(--accent);
   background: var(--accent-soft); color: var(--accent); font-size: 15px; font-weight: 700; cursor: pointer; }
 .start-count-btn:disabled { opacity: .5; cursor: default; }
+.start-count-btn.on { background: var(--accent); color: #fff; }
+.start-select { width: 100%; height: 46px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink); font-size: 15px; padding: 0 12px; cursor: pointer;
+  -webkit-appearance: none; appearance: none; }
+/* 단어장 관리 모달 */
+.deck-mgr { max-width: 420px; }
+.deck-mgr-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.deck-mgr-head h3 { margin: 0; font-size: 18px; font-weight: 800; color: var(--ink); }
+.deck-new { display: flex; gap: 8px; margin-bottom: 16px; }
+.deck-new .input { flex: 1; }
+.deck-new-btn { height: 44px; padding: 0 16px; border-radius: 12px; border: none;
+  background: var(--accent); color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.deck-list { display: flex; flex-direction: column; gap: 8px; }
+.deck-empty { color: var(--muted); font-size: 13px; padding: 10px 2px; }
+.deck-item { display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+  background: var(--fill); border-radius: 12px; }
+.deck-item-name { flex: 1; font-size: 15px; font-weight: 600; color: var(--ink); }
+.deck-item-count { font-size: 12px; color: var(--muted); }
+.deck-item-btn { height: 32px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink-2); font-size: 13px; font-weight: 600; cursor: pointer; }
+.deck-item-del { color: #d9534f; border-color: #f0c0bd; }
+/* 상세 모달 내 단어장/품사 */
+.modal-decks { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.modal-decks-head { font-size: 13px; color: var(--ink-2); margin-bottom: 10px; }
+.modal-decks-head b { color: var(--ink); }
+.modal-decks-label { font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 8px; }
+.modal-deck-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.deck-chip { padding: 7px 12px; border-radius: 980px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink-2); font-size: 13px; font-weight: 600; cursor: pointer; }
+.deck-chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.deck-chip-add { border-style: dashed; color: var(--accent); }
+.list-chip-add { border-style: dashed; color: var(--accent); }
 .empty-count-btns { display: flex; gap: 8px; max-width: 320px; margin: 0 auto; }
 .empty-count-btn { flex: 1; height: 46px; border-radius: 12px; border: none;
   background: var(--accent); color: #fff; font-size: 16px; font-weight: 700; cursor: pointer; }
