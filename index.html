@@ -1013,12 +1013,7 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession, de
           <div className="start-section-label">카테고리별 학습</div>
           <select className="start-select" value={catSel} onChange={(e) => setCatSel(e.target.value)}>
             <option value="">분류 선택…</option>
-            <optgroup label="품사">
-              {POS_CATEGORIES.map((p) => {
-                const n = cardsRef.current.filter((c) => !c.suspended && posClass(c) === p.key).length;
-                return <option key={p.key} value={"pos:" + p.key}>{p.label} ({n})</option>;
-              })}
-            </optgroup>
+            <option value="pos:mimetic">의성·의태어 ({cardsRef.current.filter((c) => !c.suspended && posClass(c) === "mimetic").length})</option>
             {decks && decks.length > 0 && (
               <optgroup label="내 단어장">
                 {decks.map((d) => {
@@ -1679,7 +1674,6 @@ function ListView({ cards, setCards, voiceRef, decks, setDecks }) {
 
       <div className="list-chips">
         <button className={"list-chip" + (flt === "all" ? " on" : "")} onClick={() => setFlt("all")}>전체</button>
-        <button className={"list-chip list-chip-weak" + (flt === "weak" ? " on" : "")} onClick={() => setFlt("weak")}>약점{counts.weak ? " " + counts.weak : ""}</button>
         <button className={"list-chip list-chip-fav" + (flt === "fav" ? " on" : "")} onClick={() => setFlt("fav")}>
           <Icon.Star filled={true} />{counts.fav ? " " + counts.fav : ""}
         </button>
@@ -1689,17 +1683,12 @@ function ListView({ cards, setCards, voiceRef, decks, setDecks }) {
       </div>
 
       <div className="list-chips">
-        <button className={"list-chip" + (posFlt === "all" ? " on" : "")} onClick={() => setPosFlt("all")}>품사 전체</button>
-        {POS_CATEGORIES.map((p) => (
-          <button key={p.key} className={"list-chip" + (posFlt === p.key ? " on" : "")} onClick={() => setPosFlt(p.key)}>{p.label}</button>
-        ))}
-      </div>
-
-      <div className="list-chips">
         <button className={"list-chip" + (deckFlt === "all" ? " on" : "")} onClick={() => setDeckFlt("all")}>단어장 전체</button>
         {decks.map((d) => (
           <button key={d.id} className={"list-chip" + (deckFlt === d.id ? " on" : "")} onClick={() => setDeckFlt(d.id)}>{d.name}</button>
         ))}
+        <button className={"list-chip" + (posFlt === "mimetic" ? " on" : "")}
+          onClick={() => setPosFlt(posFlt === "mimetic" ? "all" : "mimetic")}>의성·의태어</button>
         <button className="list-chip list-chip-add" onClick={() => setShowDeckMgr(true)}>＋ 관리</button>
       </div>
 
@@ -2651,6 +2640,20 @@ function App() {
 
   useEffect(() => { saveDecks(decks); }, [decks]);
 
+  // iOS 상태바(시계 영역)를 탭하면 OS가 window를 맨 위로 스크롤한다.
+  // 이 앱은 내부 .scroll-area가 실제 스크롤러라, window가 0이 되는 순간을 감지해
+  // 내부 영역도 맨 위로 올려준다.
+  useEffect(() => {
+    const onWinScroll = () => {
+      if (window.scrollY === 0) {
+        const sa = document.querySelector(".scroll-area");
+        if (sa && sa.scrollTop > 0) sa.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    };
+    window.addEventListener("scroll", onWinScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onWinScroll);
+  }, []);
+
   // 세션 변경 시 저장
   useEffect(() => {
     saveSession(studySession);
@@ -2695,7 +2698,7 @@ function App() {
     <div className="app" style={STYLE_VARS}>
       <style>{CSS}</style>
 
-      <header className="topbar">
+      <header className="topbar" onClick={() => { const sa = document.querySelector(".scroll-area"); if (sa) sa.scrollTo({ top: 0, behavior: "smooth" }); }}>
         <div className="topbar-inner">
           <div className="topbar-title">일본어 단어장</div>
           <img className="topbar-icon" src={HEADER_ICON} alt="" />
@@ -3018,27 +3021,27 @@ const CSS = `
   font-size: 15px; font-weight: 600; cursor: pointer; }
 .empty-section-label { color: var(--ink-2); font-size: 13px; font-weight: 600; margin: 18px 0 8px; }
 /* 시작 화면(흰 배경, 완료카드 레이아웃 차용) */
-.start-screen { display: flex; align-items: flex-start; justify-content: center; padding: 14px 16px 20px; }
+.start-screen { display: flex; align-items: flex-start; justify-content: center; padding: 8px 16px 14px; }
 .start-card { width: 100%; max-width: 420px; background: var(--surface);
-  border-radius: 24px; padding: 22px 20px 20px; text-align: center;
+  border-radius: 22px; padding: 16px 18px 18px; text-align: center;
   box-shadow: 0 6px 28px rgba(0,0,0,.08); animation: pop .25s cubic-bezier(.2,.8,.2,1); }
-.start-img { width: 100%; max-width: 200px; border-radius: 18px; display: block; margin: 0 auto 16px; }
+.start-img { width: 100%; max-width: 132px; border-radius: 14px; display: block; margin: 0 auto 8px; }
 .empty-img { width: 100%; max-width: 180px; display: block; margin: 0 auto 18px; }
-.start-title { color: var(--ink); font-size: 22px; font-weight: 800; letter-spacing: -0.3px; margin-bottom: 6px; }
-.start-sub { color: var(--muted); font-size: 14px; margin-bottom: 18px; }
-.start-btn-primary { width: 100%; height: 52px; border-radius: 14px; border: none;
-  background: var(--accent); color: #fff; font-size: 16px; font-weight: 700; cursor: pointer; margin-bottom: 10px; }
+.start-title { color: var(--ink); font-size: 20px; font-weight: 800; letter-spacing: -0.3px; margin-bottom: 3px; }
+.start-sub { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+.start-btn-primary { width: 100%; height: 48px; border-radius: 13px; border: none;
+  background: var(--accent); color: #fff; font-size: 16px; font-weight: 700; cursor: pointer; margin-bottom: 8px; }
 .start-btn-primary:disabled { opacity: .5; cursor: default; }
-.start-btn { width: 100%; height: 48px; border-radius: 14px; border: 1px solid var(--line);
-  background: var(--fill); color: var(--ink); font-size: 15px; font-weight: 600; cursor: pointer; margin-bottom: 10px; }
-.start-section-label { color: var(--ink-2); font-size: 13px; font-weight: 600; text-align: left; margin: 16px 0 8px; }
-.start-count-btns { display: flex; gap: 8px; }
-.start-count-btn { flex: 1; height: 44px; border-radius: 12px; border: 1px solid var(--accent);
-  background: var(--accent-soft); color: var(--accent); font-size: 15px; font-weight: 700; cursor: pointer; }
+.start-btn { width: 100%; height: 44px; border-radius: 13px; border: 1px solid var(--line);
+  background: var(--fill); color: var(--ink); font-size: 15px; font-weight: 600; cursor: pointer; margin-bottom: 8px; }
+.start-section-label { color: var(--ink-2); font-size: 12px; font-weight: 600; text-align: left; margin: 10px 0 6px; }
+.start-count-btns { display: flex; gap: 7px; }
+.start-count-btn { flex: 1; height: 40px; border-radius: 11px; border: 1px solid var(--accent);
+  background: var(--accent-soft); color: var(--accent); font-size: 14px; font-weight: 700; cursor: pointer; }
 .start-count-btn:disabled { opacity: .5; cursor: default; }
 .start-count-btn.on { background: var(--accent); color: #fff; }
-.start-select { width: 100%; height: 46px; border-radius: 12px; border: 1px solid var(--line);
-  background: var(--surface); color: var(--ink); font-size: 15px; padding: 0 12px; cursor: pointer;
+.start-select { width: 100%; height: 42px; border-radius: 11px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink); font-size: 14px; padding: 0 12px; cursor: pointer;
   -webkit-appearance: none; appearance: none; }
 /* 단어장 관리 모달 */
 .deck-mgr { max-width: 420px; }
