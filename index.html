@@ -790,8 +790,10 @@ const Icon = {
   ),
   Cards: (p) => (
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" {...p}>
-      <rect x="4.7" y="8.1" width="12" height="10" rx="2" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M8.95 4.85h9a2 2 0 0 1 2 2v7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <g transform="translate(12 12) scale(1.1) translate(-12 -12)">
+        <rect x="4.7" y="8.1" width="12" height="10" rx="2" stroke="currentColor" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
+        <path d="M8.95 4.85h9a2 2 0 0 1 2 2v7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      </g>
     </svg>
   ),
   List: (p) => (
@@ -1866,6 +1868,12 @@ function AddView({ cards, setCards, voiceRef }) {
       setNote("단어와 뜻은 필수예요.");
       return;
     }
+    // 같은 일본어 단어가 이미 있으면 경고하고, 사용자가 확인할 때만 추가
+    const dup = cards.find((c) => c.word === word);
+    if (dup) {
+      const ok = confirm(`'${word}'은(는) 이미 등록된 단어예요.\n그래도 추가할까요?`);
+      if (!ok) { setNote(`'${word}'은(는) 이미 있는 단어예요. 추가하지 않았어요.`); return; }
+    }
     const exJa = form.exJa.trim();
     const ex = exJa
       ? { ja: exJa, ko: form.exKo.trim(), tokens: tokenizeJa(exJa, form.furi || {}) }
@@ -2521,19 +2529,25 @@ const QUIZ_LEN = 10;
 
 // 최근 7일 학습한 카드 우선, 모자라면 나머지에서 무작위로 채움
 function quizSubjectPool(cards) {
+  const today = todayStr();
   const cutoff = Date.now() - 7 * DAY;
-  const recent = [];
-  const rest = [];
+  const todayArr = [];   // 오늘 학습한 단어 (최우선)
+  const recent = [];     // 최근 7일내 학습
+  const rest = [];       // 그 외
   for (const c of cards) {
     if (!c.word || !c.meaning) continue;
-    const studiedRecently = (c.history || []).some((h) => {
+    const hist = c.history || [];
+    const studiedToday = hist.some((h) => h.d === today);
+    const studiedRecently = hist.some((h) => {
       const t = new Date(h.d).getTime();
       return !isNaN(t) && t >= cutoff;
     });
-    if (studiedRecently) recent.push(c);
+    if (studiedToday) todayArr.push(c);
+    else if (studiedRecently) recent.push(c);
     else rest.push(c);
   }
-  return { recent, rest };
+  // recent 안에 오늘 것을 앞세우는 형태로 합쳐 반환(오늘 → 7일내 → 그외)
+  return { recent: todayArr.concat(recent), rest };
 }
 
 // 한국어 뜻으로 품사 대략 분류: 동사/형용사(다로 끝남) vs 명사 vs 기타
@@ -2609,13 +2623,24 @@ function pickDistractors(all, answer, n) {
   return out;
 }
 
-function buildQuizRound(cards, mode) {
+function buildQuizRound(cards, mode, excludeIds) {
   const all = cards.filter((c) => c.word && c.meaning);
   if (all.length < 4) return [];
   const { recent, rest } = quizSubjectPool(cards);
-  let subjects = shuffleArr(recent).slice(0, QUIZ_LEN);
+  // 연달아 풀 때 직전 라운드에 나온 문제는 제외(틀린 문제는 호출부에서 다시 포함)
+  const ex = excludeIds instanceof Set ? excludeIds : new Set(excludeIds || []);
+  const avail = (arr) => arr.filter((c) => !ex.has(c.id));
+  // recent는 이미 [오늘 → 7일내] 순서. 순서를 유지하되 각 구간 안에서만 섞기 위해
+  // 우선 recent에서 채우고 모자라면 rest로 채운다.
+  let subjects = avail(recent).slice(0, QUIZ_LEN);
   if (subjects.length < QUIZ_LEN) {
-    subjects = subjects.concat(shuffleArr(rest).slice(0, QUIZ_LEN - subjects.length));
+    subjects = subjects.concat(shuffleArr(avail(rest)).slice(0, QUIZ_LEN - subjects.length));
+  }
+  // 제외 때문에 부족하면(거의 다 풀었으면) 제외 무시하고 채움
+  if (subjects.length < QUIZ_LEN) {
+    const used = new Set(subjects.map((c) => c.id));
+    const fill = recent.concat(rest).filter((c) => !used.has(c.id));
+    subjects = subjects.concat(shuffleArr(fill).slice(0, QUIZ_LEN - subjects.length));
   }
   if (subjects.length === 0) return [];
   return subjects.map((answer) => {
@@ -2633,11 +2658,12 @@ function QuizView({ cards, setCards, setQuizLog }) {
   const [correct, setCorrect] = useState(0);
   const [wrongList, setWrongList] = useState([]); // 틀린 문제 [{answerId, pickedId}]
   const [finished, setFinished] = useState(false);
+  const [prevAsked, setPrevAsked] = useState(new Set()); // 직전 라운드에 맞힌(=다시 안 낼) 문제 ID
 
   const pool = useMemo(() => cards.filter((c) => c.word && c.meaning), [cards]);
 
   const startRound = (m) => {
-    const r = buildQuizRound(cards, m);
+    const r = buildQuizRound(cards, m, prevAsked);
     setMode(m);
     setRound(r);
     setQi(0);
@@ -2765,7 +2791,14 @@ function QuizView({ cards, setCards, setQuizLog }) {
     }
   };
   const next = () => {
-    if (qi + 1 >= round.length) { setFinished(true); return; }
+    if (qi + 1 >= round.length) {
+      // 이번 라운드에서 '맞힌' 문제만 다음 라운드 제외 대상으로 기록(틀린 건 다시 나와도 됨)
+      const wrongIds = new Set(wrongList.map((w) => w.answerId));
+      const correctIds = round.map((q) => q.answerId).filter((id) => !wrongIds.has(id));
+      setPrevAsked(new Set(correctIds));
+      setFinished(true);
+      return;
+    }
     setQi(qi + 1);
     setPicked(null);
   };
@@ -4065,14 +4098,14 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
   text-decoration: underline; text-underline-offset: 3px; }
 
 .listen-src { display: flex; gap: 7px; flex-wrap: wrap; }
-.listen-src-btn { flex: 1; min-width: 90px; min-height: 44px; padding: 8px 10px; border-radius: 11px;
+.listen-src-btn { flex: 1; min-width: 90px; min-height: 40px; padding: 6px 10px; border-radius: 11px;
   border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent);
   font-size: 14px; font-weight: 700; cursor: pointer; line-height: 1.5; word-break: keep-all;
   display: flex; align-items: center; justify-content: center; }
 .listen-src-btn.on { background: var(--accent); color: #fff; }
 
 .listen-opt-row { display: flex; align-items: center; justify-content: space-between;
-  gap: 14px; margin-top: 18px; padding: 14px 4px; }
+  gap: 14px; margin-top: 9px; padding: 11px 4px; }
 .listen-opt-text { flex: 1; }
 .listen-opt-title { font-size: 15px; font-weight: 700; color: var(--ink); line-height: 1.5; word-break: keep-all; }
 .listen-opt-sub { font-size: 12.5px; color: var(--ink-2); margin-top: 3px; line-height: 1.5; word-break: keep-all; }
@@ -4082,7 +4115,7 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .listen-toggle-knob { position: absolute; top: 3px; left: 3px; width: 25px; height: 25px;
   border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform .2s; }
 .listen-toggle.on .listen-toggle-knob { transform: translateX(21px); }
-.listen-note { font-size: 12px; color: var(--ink-2); margin-top: 20px; line-height: 1.6;
+.listen-note { font-size: 12px; color: var(--ink-2); margin-top: 12px; line-height: 1.6;
   text-align: center; word-break: keep-all; }
 `;
 
