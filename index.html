@@ -32,7 +32,6 @@
 <script src="words.js"></script>
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef, useMemo, useCallback, Fragment } = React;
-
 const HEADER_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEsAAABICAYAAAC+2ghEAAAWO0lEQVR42t1ce3RU1bn/7X3OmTNJJplH3gkYnrHRMJRoQFmNcfmopT6qVhsXFxfUrlul0MVliUCJohTvEktJr4JdNgItra/ecpeg0AshagIiRGoRDJbwfpkQIJmQSTKZOefs7/7hnLknw0wmPKSxe629zsw++7y+8/2+/fseM8ClNw4AycnJYyVJ+gTACQBb0tPT72eMmXNkXF6TAYAxBo/HcweA/wGwX5bl191utxMAC/dB39jDDz8scc53AaCysjLKy8sjACTL8hujRo0aEp4nmYK1PFx0j/UiOABcc801IxhjfwYgCgoK6JZbbiHGGEmStMpy/kHdOAAMHTr0egA0bdo0g4iEpmnG888/LzjnBOCMx+OZatGyhMK3Co8xBrfb/QSAjpSUFFq+fLkgIoOI9GnTphkAOsrLy12WYwdtkwAgIyPjbgC0efNmfcuWLVReXk4NDQ30j3/8Qx87diwBIFVV/zs3N/dbH374oUxEEhHx6C5JEjjnkT5y5MhRiqKsB0C33norNTc36x9//DF95zvfoQ0bNtB7771HACg/P99rfXmDtclhe/UoANq5c6f20EMPUVFRETkcDlq8eDERkZgxY4YBgAD0Amjqp+8DsAvAJwD+BqAbAC1atEgnIjFv3jxyOBzk9Xrpvvvuo7q6OgMAZWRklF1NKF6WAZYkKQcAkpKS0NLSgnnz5mH8+PG4+eabceLECVZdXc3KysqM3/zmN2pXV1ehLMuQJCnSGWMQQsAwDGiaBsMwYBgGnE4nKisrjXvuuUf60Y9+hJqaGnz66af4+OOPUV1dDUVRCAB0XfdcdQ251GYYhmQKS1EUdHd3o6ioCPv378dPfvITNDY2oqKiQqqoqKCwhvXXKMp2Sfv37wfnHAcOHEBWVhZqa2uhKApk+avbFkLYr6bNuixhCSEAAHa7HXa7PaIpOTk52LhxY0RTOOeMhS09UWyZWRcCIoIQAoWFhXj77bcj17LZbAAAVVXNk7i+MZql67oAAE3TUFFRgWHDhoFzDsMwwBiDJEl9BMAYQ6LV0ZxnHmsYhgl5FBcX47HHHouMBYNB8U3gWHL4AZYBoD179mh0FVtdXZ0GgJKTk38RhqB8NR76UpZcBsD46U9/qggh7k1LS0NeXh4XQkRg+XU1wzAghEBeXh7jnKO3t7ecMUYAxKDWKrfbXQGApk6dqhMR6bp+VbRKCEGGYYiSkhIBIDBs2LCCwcy1+LPPPsslSfpUkiTau3fvVRWWpn2F+JdeekkDQA6H4xdXyA/9epi72+3+HgB68MEHjUSCMgyDDMMYsDASzTf3tbS0GA6Hgxhjnz/77LN8MLo8EgAoirIOgNi2bZsmhIgrLCFEzM/9QWwg883rPfDAAwKAyMvLu3mwOdUMALxebxaAzuuuu440TRPxHsocP3bsGO3Zs2fAgjp16hT9/e9/TwhFIQT96U9/0gBQSkrK4sEGRQkAPB7PDwHQnDlzdKsNiYaKEIL27t1LLpeLAFB9fT3Fg6wQgoQQdO7cORo5ciQBoFWrVsWdb0LxwIEDuizLxBjbEOZvX6tm8YvVrEAgUAqAbrnlFopm3lZmzxjDmjVr0NHRAc45duzYgXgM3px/6NAhHD58GLIsY82aNYh3fnOsoKCA5efng4jG3HXXXSoA4+u0XfwiBMXLy8vlYDB4HeecjR49GrquR1yaWBwrNTU1IozS0tK4D885BxFh1KhRyMnJga7rKCgo6CNc0wUyr6dpGjjnLC8vDwA8+/btSw8/zz/N0HOrQDnnAPCBx+MhItIT2Z9z587R9OnTafny5X3Graud+dnc7tixgxYtWkRffvllZLyf1Vbcf//9BEArLS1NjzYZX4vRTtTsdvs1QohxnPOiUCg0W1GUrAcffJDS09OZy+XCNddcg5KSEowdOzYSEbiUZvqFsdrZs2fR2NiIw4cP4+zZs/D5fNA0jdavX49jx44xVVXnGIZRW1BQsP/QoUPBr81oxwvxqqp6F+d8KRE9whgbzjkP6bp+bVJSkmvmzJkoLi5mbrcb7e3t2Lp1K3bv3o2bbroJnHMwxkBEMAwDRATOecQ2VVdXY/r06fjd736HUCiE8ePHm9GJCNTMdubMGcybNw9vvvkmjh49Cs45PB4PcnNzMXz4cPbJJ5+wM2fOhBRFaTcM4/vnz5//N0VRCnNzc3d2dnYaVwOWDICkqupMVVVvf/jhhyXT3jDGXlVVlbq7uzUiIp/PR0ePHqWGhgaqra2lUCiUkH3PmDHDjG/RzJkzKdaqakL29OnTVFtbSydOnKD29nYKBAJ9FsaioiICsNeMUiQlJeXZbLZ7srOzU650rEvuJxBnBIPBFQDwl7/8JQITVVXbgsEg7rrrLjidTkiShLS0NOTk5GD8+PF9wjIxIqsgIixbtgw2mw1CCLz44osgorjHdXV1YdOmTXjttdfQ1taGrq4uUyggIjQ1NUFRlFBqamp+e3v7l4FAoBlAc2tra3RQ8erFu2w22wOKovzW4XC8ryhK7/Dhw8XLL79MW7dupWAwSIFAgHbt2kU+n69fBh5rvL+xY8eO0V//+lc6evRoZN+JEyforbfeotLSUiFJkkhJSflUVdX1iqKsUBSlOHphuhoGngMgm832LSL6lSzLkhCiNxgMDgMwJmzv/j+bKst47LHHUFVVhaSkpAEF+gZi7JuamlBdXY2TJ08iEAhAlmXU1NSgp6cHjDEKU4svAexOSUlp1TRNJCUlzT9//nzH1dQsBoDb7fZnUlJS/kOW5RoAxqRJk2jVqlXU0NBAjY2NtHnzZpo9ezalp6dTYWEhNTU1XUAPrN9ra2uppKSEvF4veb1eKi4upiVLllAih7yxsZGSk5PJ4XDQc889R/X19fTZZ5/R+++/T7/85S9N5n84LS3te/+skA3nnENRlNqUlBR655139HCi84J24sQJGjJkCBUVFVEwGIy4MNGwam9vp3Xr1tGKFSuoqqqKXn/9dTp+/HhMOIZjV9TW1kZDhgyhG264gc6cORMT3V1dXdoDDzxAAHoKCgqGmS/7qtqrtLS0RwDQ6tWrQ0REoVCINE2LhFJ0Xafe3t4IoQRA69atoysR4zJXyKeffpoYYxGiGgwGSdf1yPXNFTgQCISGDh1KjLH/ChPoq+ZYy+ELrhk+fLggIk3X9bjG2IRZRkYGPf744xTPyTZDOpqmkaZpFO+cVk0bPnw4TZkyhcyXFauFx40nn3xSAPiboihXPEUmRxPRqJg3Z4xle71eBoCZWRsiivhs1u+cc7hcLjQ3N0MIEfHnYjnC0amvaAfbPJ9hGDh79izGjRsXScSaFMS8tjUt53a7GQB7KBTi4Wswi6GnKyEsKeyxW08mwtzncEtLC8IrY78n6+7uxqlTp1BRURGpW7hsF0OSkJubi127dkFRFIQ1JuY8AOLdd9/lAHZLkiTirPCXnNwwl38xdepUu6qqOenp6ek5OTmujIyM9Pz8/DTDMNxHjx79vt/vJ0mS+MKFC1FTU4OcnBxs3rwZlZWVCAaDaG5uxuzZs3Hq1ClUVlZCURT4fD74/X50dnZeUvf5fOjq6oLf78fq1auh6zqOHDmCBQsWIC0tDUSEJUuWYOfOnQCAyspK1NTUUH5+/tIRI0Z0ZmZmpufm5jqzsrIcDoeD+Xy+3st+e6qqPg7gGIAuAEFL7wUQsKjwN6ELfFVY0mt5ji4AZ+x2+8LLoRXM6XTe0dnZuaWwsBBTpkyBw+HoE0OyhmesdkjX9T5bc1zTtIj9MMesPZaNip5n7je7ECJSTGKdb3WTTCfdjK1ZnXEA2LZtG1paWvTs7OzclpaWc2FEXZwNk2X53eTkZHH06FGNiESc/k1r0fdvLFiwQAAIjRgxYvSlapes63pRaWkpGzZsmKTrOlu8eDG2bdsGWZYjb8tcuWJto/f3NzdWEYgZzok+V7yV01w0Yl3X0pkkSRBCwOv1YubMmSAiFs5MaZezGnqGDBkSuZE77rgDI0eOjKh2NCSsdCAaVtYeD27R2+jPFzsWfY9Wv1IIgbS0tH4jIRcrLJtJ4IQQKCsrQ1lZGf7V2uU49VZhaYFAAACIc85efPFF1NXV9YFhLMhZEw1WaMSBxQU3bcIvHmG9FPjHOvb666/Hz372M1PrmAnHSxVW8/Hjx10AiDHGSkpK4HQ6I+w5miFHq34sqMaDYKzviaBpnt+aNosHfWs3V0Yigq7rVwaGsizv3Ldv3/Wff/65GDNmDO68807ceeed/3IwVFUVALgQgicKS8XwKQUAIaekpPxnZ2dn2W233Tba7XaLYDDIrWpswsV0X/obN4tq480zS7hNn856jNmjV8d4q+VAt+EoL3bu3AnG2Nne3l5fjKCgKSQDgGFe17rIAeCyy+Vq6erq8p87d455PB7KyMiI6dTGglo0OTUJYXRKyySJ1pU0Fvz6WyH7u494x1nsIIVCISZJ0rmRI0d2njp1ykpIpbCAjMmTJ6dt2LCh9Pz58zcahjEqbKaOuVyudR0dHXvg8XgeBEBPPfXUN5F8Jmy6rlNPT4+YNWsWAej47ne/67FmsABgxIgRWYqivADgJABKT0+nkpISuvnmmykrK4sAaKqq/rvs9/tLGWM0depUAUDauHFjpN4gumg2GmL9QSUeUY2GSTyY2Ww2JCcnw+/397mPWHPtdjtUVUV3d3cEPuY2MzMTxcXFcLvdAGCYNfRhQelOp/OHR44cWc45z33kkUfw6KOPiokTJwqXywUAaGtro8mTJytbtmxZJmuaNtzj8Zg1A2hsbMSOHTv6rCaJYJBoO9DPVh+vtbUVTU1NKCsrg6IocU0D5xyHDh3CyZMnI/UUps9oGAYmTpyIl156CZp2AXHXU1NTp50/f/73xcXFWLlypT5hwgQpOjOUnp4uJkyYoNfU1CQBwJZhw4aRpmnGYILPtm3biHMeCVn315YuXUo5OTn9+opPP/00AWgrLy/PCAvhRgD6xIkTjY6ODsMMV5vz/X6//uGHHxpz584lh8NBsixXy1YDLMsy6urqcPDgwT7RyETEL9pfi0cYE5FS00Wx2WzYvn07OOdob29HVlYWdF2/4By6rkNVVYRCIQQCAdTX1/eJsoZ/WYbi4uLIJWRZJiJikiT9Ni8vT1q3bp3hdDqlYDAIVVXR0tIili1bxteuXSsdP34cAA4B+H15efmvZACtXV1d6OnpIVmWUV9fj+3bt0fU+GL9uHjwih6LDk9b9zPGcO7cOaiqGqEXsYpGTNqiKAq6urowZ86cyD2bgr/pppvwyiuvmKuwVFtb2+FyuW4VQpQ+//zzRmZmZkRQNTU1YurUqfz06dNBAK87nc4333rrre133313sL6+HrDZbAs553Tw4EF9MMHwgw8+IADU2toaSX7out6nmxBdvHgxZWVl9QvDxYsXE4DzRCQzxt7Jz88XgUBAMzNQ27dvN2w2GwHYO3r06LFRIXEJAJPT09M3nj59+umFCxfKP//5z6FpWkxil8hJNfmV9SKJwjTxqgZlWUZDQ0NEowaQ3EQwGMSuXbv63IsJVVmWsXfvXgDo8Hq9NxLRpPvvvx92u10yDAM9PT3ixz/+MQuFQscnTJhwZ0NDQysAxWTuYbIaYbh/DpM0fTCFiJ1OJzU3NyfUrGXLliU6l4Gvfo68NykpaSPnnD7//HPDTLWtXr1aB0BZWVn3hUUSMysiX3vttakHDx70jh49GosWLWI5OTmRaMLFMGqrZvRHNRIxbzOEvGPHDixfvnxAGaJQKITU1FS8+uqrMR1vRVH4H//4R2zZsmVMIBAY8+STT6K4uJiHtc5YuXIlZ4ztaW1tfY8xJgGIHSDMzc0tA0DV1dWDisHX1tZeSZtFv/71rwkA3XvvvSIYDFIoFCIhBO3evVvjnJOqqjMSlGFB7ujoKAGAG264Qei6Ls2aNQu1tbWQZfmCoL/V7lhXrnhBtng2L9YxpgaZhNLn8yElJWVAP55SVRVtbW2RCkJzBTVJaVVVFXw+H1RVxdtvv81sNhtCoRAYY2LevHlcCHG2tLT0zY8++oj1sU/Rwurt7c1XVRUZGRmQZRnPPfcc5s6de4HTm6gnilENxHk2yyo556irq0NlZeUFgo31knRdh8PhwAsvvNDHkScieDyeiOtms9mgKAoMw4DNZsPSpUuNmpoaxeFwVH700Uc+S7I5trDMN2lmejMzMwdF/Mnv90e0JLpmS5KkPu6LYRhQVRW33357vys2EZnPSStWrNDmzp1rS0pK+nN3d/driQQFADJjDJqmIRAIQAiB2bNnY/PmzZGw8kBi2YmgGK/2PR55lWUZ7e3tfWBo0hIiQmtrK7Kzs9HT09MHhhMnToyYDnPuhAkTUFVVFdHcL774Qq+qqpJWrVplUxRlQ3l5+dRNmzYNKK0v2+32w4FAAH6/n3HOMX/+fMyYMSPCVxKx9/7mRGtFf4ze/GwWfnzwwQeorKy8wJZNmzYNmzZtQk1NDbxebySWlpqaiiVLlvSBoRACmZmZkCQJTqcTPT09GDdunBwKhXRVVV+eP3/+U4sWLRIDTbjKbre7rre3N/iHP/xBnTNnDjkcDmaGJy7FWPdx63Uduq5H3vJAukkiMzMz+8TgbTYbpk+fjjVr1kCWZUyaNAkbN27Et7/9bYRCIXDOMXTo0Auy2r29vdixYwc+++wzAqArirI0Ozv7zZMnT+5btGgRLjozLUnS6vAB2mAipWlpaRFSOmXKlAv2K4pCR44coZUrVw6UlH5mebkXnUyUvV5vSmNjozc7OxtlZWXc+icV0YG+gbg9/QUGo12fWK6RCbeDBw/i/fffh9PpxOTJk7F582bMnz8/kqmx2+344osvMH78eEyaNAkejwezZs2KXMu8/7CHwtavX4+tW7fm3Hjjjem7du3yXVLpkdvt/j4AWrt27aAipQ0NDZSWlkYPPfQQeb3emFWEZiyLc07jxo3r15EOu0ShoqKiS/5Ntezz+UqTk5Np4sSJwjAMqaqqCg0NDVAUJWatQ6xEa6LYVSKH2qp9pmYdOHAAnZ2dWLt2LSoqKvDMM8+gq6srkg0yC9jS0tKQkpKC3bt346mnnopok+mEX3vttZgyZQpCodBll3nLAHI8Hg9zu92QJAmFhYV9VqZYq1yixGqi8PJAyKnX68X48eOhqmqkKI4xBl3X+8zr7OzEE088ASKCz+e7IBKSlZUFWZbNvOFlp+9V6z90/OAHP8C/YrucX6tZhXW+u7sbfr8fHo8Hr7zyCnbu3NmHlCbK2gy01iEefKPJ6pWodTDvadSoUZg8eXJMP/dS0vdtnZ2d5Pf74XK54Ha7I/8pYw13RJPPeKU+sWAWi4RGh3L6S5YOpGwpeq6ZnUpKSrLe/+XZLKfT+VFbWxt74403sGDBAjF58mT2DULXQB+e/H4/AyAZhnHJJdTsuuuuszU1NdULIW4qKytDenp6XE4VL0HRn9E2Ncia2rdqZ6zx6GOjv0dvY2m79b4kScLZs2fR3d3d6nK5Ctvb2/0XKexIChtOp3NYd3f3i7qujwHgAGCPqiRhUW8zugBfhL9bXQcR5cWzqLmJtCXePLLs08KhcOtxZLm2Ed6vAwjabLYVoVDof3GJ9fD/B2sw+AeoUfjnAAAAAElFTkSuQmCC";
 const FINISH_IMAGES = [
   "img/cat1.png",
@@ -329,10 +328,17 @@ function displayWord(card) {
 function tildeToYomi(s) {
   return (s || "").replace(/[~\u301C\uFF5E\u223C]+/g, "なになに");
 }
+/* 단어 발음용 텍스트:
+   - 상용외(희귀) 한자가 든 단어만 요미가나(히라가나)로 읽어 엔진 오독을 피한다.
+   - 그 외 한자어는 한자 원문을 그대로 보낸다. 엔진이 한자를 사전으로 정확히 읽어
+     (예: 立ち入る → たちいる) 히라가나만 줄 때의 경계 오독(た・ちいる)을 방지한다. */
 function wordSpeech(card) {
   const clean = card.word.split(/[／/・↔≠\s(]/)[0];
-  if (card.hasKanji && card.reading) {
-    return tildeToYomi(card.reading.split(/[／/・↔≠\s(]/)[0]);
+  if (card.hasKanji) {
+    if (card.reading && hasNonJoyo(card.word)) {
+      return tildeToYomi(card.reading.split(/[／/・↔≠\s(]/)[0]);
+    }
+    return tildeToYomi(clean); // 한자 원문 그대로
   }
   return tildeToYomi(clean);
 }
@@ -1370,10 +1376,13 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession, de
     const totalSec = Object.values(timeLog || {}).reduce((a, b) => a + (b || 0), 0);
     const th = Math.floor(totalSec / 3600);
     const tm = Math.floor((totalSec % 3600) / 60);
+    const todayMin = Math.max(1, Math.round((timeLog[todayStr()] || 0) / 60));
+    const todayWords = session.total || (session.queue ? session.queue.length : 0);
     return (
       <div className="finish-screen">
         <div className="finish-card">
           <div className="finish-title">오늘의 학습을 완료했습니다!</div>
+          <div className="finish-today">{todayMin}분 · 단어 {todayWords}개 학습</div>
           <div className="finish-stats">
             <div className="finish-stat">
               <span className="finish-stat-label">연속 학습</span>
@@ -1691,7 +1700,7 @@ function ListenView({ cards, voiceRef, decks }) {
       <h2 className="view-title">연속 듣기</h2>
 
       {/* 현재 재생 카드 표시 */}
-      <div className="listen-now">
+      <div className={"listen-now" + (cur ? "" : " is-idle")}>
         {cur ? (
           <>
             <div className="listen-phase-row">
@@ -2429,7 +2438,7 @@ function ListView({ cards, setCards, voiceRef, decks, setDecks }) {
 
 /* ===================== 필터 바 (한 줄 + 드롭다운 상세) ===================== */
 function FilterBar({ flt, setFlt, deckFlt, setDeckFlt, posFlt, setPosFlt, sort, setSort, decks, counts, onManageDecks }) {
-  const [open, setOpen] = useState(null); // "status" | "deck" | "manage" | null
+  const [open, setOpen] = useState(null); // "status" | "deck" | "sort" | "manage" | null
   const barRef = useRef(null);
 
   // 바깥 클릭 시 닫기
@@ -2451,6 +2460,7 @@ function FilterBar({ flt, setFlt, deckFlt, setDeckFlt, posFlt, setPosFlt, sort, 
     : ((decks.find((d) => d.id === deckFlt) || {}).name || "단어장");
 
   const SORTS = [["recent", "등록순"], ["kana", "가나다순"], ["seen", "학습횟수"]];
+  const sortLabel = (SORTS.find(([k]) => k === sort) || [, "정렬"])[1];
 
   const toggle = (k) => setOpen((o) => (o === k ? null : k));
 
@@ -2468,28 +2478,35 @@ function FilterBar({ flt, setFlt, deckFlt, setDeckFlt, posFlt, setPosFlt, sort, 
         <button
           className={"fb-seg fb-seg-fav" + (flt === "fav" ? " on" : "")}
           onClick={() => { setFlt(flt === "fav" ? "all" : "fav"); setOpen(null); }}>
-          <Icon.Star filled={true} />{counts.fav ? " " + counts.fav : ""}
+          <Icon.Star filled={true} />
         </button>
 
         {/* 학습상태 드롭다운 */}
         <button
           className={"fb-seg fb-seg-drop" + (statusActive ? " on" : "") + (open === "status" ? " open" : "")}
           onClick={() => toggle("status")}>
-          {statusLabel}<span className="fb-caret">▾</span>
+          {statusLabel}<span className="fb-caret">{open === "status" ? "▲" : "▼"}</span>
         </button>
 
         {/* 단어장 드롭다운 */}
         <button
           className={"fb-seg fb-seg-drop" + (deckActive ? " on" : "") + (open === "deck" ? " open" : "")}
           onClick={() => toggle("deck")}>
-          {deckLabel}<span className="fb-caret">▾</span>
+          {deckLabel}<span className="fb-caret">{open === "deck" ? "▲" : "▼"}</span>
         </button>
 
-        {/* 관리 드롭다운 (정렬 + 단어장 관리) */}
+        {/* 정렬 드롭다운 */}
+        <button
+          className={"fb-seg fb-seg-drop" + (sort !== "recent" ? " on" : "") + (open === "sort" ? " open" : "")}
+          onClick={() => toggle("sort")}>
+          {sortLabel}<span className="fb-caret">{open === "sort" ? "▲" : "▼"}</span>
+        </button>
+
+        {/* 관리 드롭다운 (단어장 관리) */}
         <button
           className={"fb-seg fb-seg-drop" + (open === "manage" ? " open" : "")}
           onClick={() => toggle("manage")}>
-          관리<span className="fb-caret">▾</span>
+          관리<span className="fb-caret">{open === "manage" ? "▲" : "▼"}</span>
         </button>
       </div>
 
@@ -2524,19 +2541,23 @@ function FilterBar({ flt, setFlt, deckFlt, setDeckFlt, posFlt, setPosFlt, sort, 
         </div>
       )}
 
-      {open === "manage" && (
+      {open === "sort" && (
         <div className="fb-panel">
           <div className="fb-panel-title">정렬</div>
           <div className="fb-panel-opts">
             {SORTS.map(([k, label]) => (
               <button key={k}
                 className={"fb-opt" + (sort === k ? " on" : "")}
-                onClick={() => { setSort(k); }}>
+                onClick={() => { setSort(k); setOpen(null); }}>
                 {label}
               </button>
             ))}
           </div>
-          <div className="fb-panel-divider" />
+        </div>
+      )}
+
+      {open === "manage" && (
+        <div className="fb-panel">
           <button className="fb-manage-btn" onClick={() => { setOpen(null); onManageDecks(); }}>
             ＋ 단어장 만들기·관리
           </button>
@@ -3574,7 +3595,7 @@ function App() {
           <Icon.Quiz /><span>퀴즈</span>
         </button>
         <button className={"tab" + (tab === "stats" ? " tab-on" : "")} onClick={() => setTab("stats")}>
-          <Icon.Stats /><span>통계</span>
+          <Icon.Stats /><span>통계 & 설정</span>
         </button>
       </nav>
     </div>
@@ -3785,9 +3806,9 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .voice-box { background: var(--surface); border-radius: 18px; padding: 18px;
   margin-top: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
 .voice-title { font-size: 16px; font-weight: 700; color: var(--ink); margin-bottom: 14px; }
-.voice-titlerow { display: flex; align-items: center; justify-content: space-between;
+.voice-titlerow { display: flex; align-items: flex-start; justify-content: space-between;
   margin-bottom: 14px; }
-.voice-titlerow .voice-title { margin-bottom: 0; }
+.voice-titlerow .voice-title { margin-bottom: 0; line-height: 1.2; padding-top: 6px; }
 .voice-test-sm { height: 34px; padding: 0 14px; border-radius: 10px;
   border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent);
   font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
@@ -3841,13 +3862,12 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 /* 필터 바: 한 줄 세그먼트 + 드롭다운 */
 .filterbar { position: relative; margin-bottom: 10px; }
 .filterbar-row { display: flex; gap: 6px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.fb-seg { height: 34px; padding: 0 13px; border-radius: 980px; border: 1px solid var(--line);
+.fb-seg { height: 34px; padding: 0 11px; border-radius: 980px; border: 1px solid var(--line);
   background: var(--surface); color: var(--ink-2); font-size: 13px; font-weight: 600; cursor: pointer;
   flex-shrink: 0; white-space: nowrap; display: inline-flex; align-items: center; gap: 3px; }
 .fb-seg.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .fb-seg-fav svg { width: 14px; height: 14px; }
-.fb-caret { font-size: 9px; opacity: .7; margin-left: 1px; transition: transform .15s; }
-.fb-seg.open .fb-caret { transform: rotate(180deg); }
+.fb-caret { font-size: 10px; opacity: .55; margin-left: 3px; }
 .fb-panel { position: absolute; top: 40px; left: 0; right: 0; z-index: 30;
   background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
   padding: 12px; box-shadow: 0 8px 28px rgba(0,0,0,.12); }
@@ -3872,7 +3892,9 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
   border-radius: 24px; padding: 20px 20px 18px; text-align: center;
   box-shadow: 0 10px 40px rgba(0,140,215,.35); animation: pop .25s cubic-bezier(.2,.8,.2,1); }
 .finish-title { color: #fff; font-size: 21px; font-weight: 800; letter-spacing: -0.3px;
-  margin-bottom: 16px; }
+  margin-bottom: 8px; }
+.finish-today { color: #fff; font-size: 19px; font-weight: 700; letter-spacing: -0.2px;
+  margin-bottom: 14px; }
 .finish-stats { display: flex; gap: 10px; margin-bottom: 16px; }
 .finish-stat { flex: 1; background: rgba(255,255,255,.15); border-radius: 14px; padding: 10px 8px; }
 .finish-stat-label { display: block; color: rgba(255,255,255,.85); font-size: 12px; margin-bottom: 4px; }
@@ -3883,11 +3905,11 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .finish-section-label { color: rgba(255,255,255,.9); font-size: 13px; font-weight: 600;
   text-align: left; margin: 2px 0 8px; }
 .finish-count-btns { display: flex; gap: 8px; margin-bottom: 10px; }
-.finish-count-btn { flex: 1; height: 46px; border-radius: 12px; border: none;
-  background: #fff; color: var(--accent); font-size: 16px; font-weight: 700; cursor: pointer; }
+.finish-count-btn { flex: 1; height: 38px; border-radius: 12px; border: none;
+  background: #fff; color: var(--accent); font-size: 15px; font-weight: 700; cursor: pointer; }
 .finish-count-btn:disabled { opacity: .5; cursor: default; }
-.finish-review { width: 100%; height: 46px; border-radius: 12px; border: none;
-  background: rgba(255,255,255,.22); color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
+.finish-review { width: 100%; height: 38px; border-radius: 12px; border: none;
+  background: rgba(255,255,255,.22); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
 .finish-close { width: 100%; height: 44px; margin-top: 8px; border-radius: 14px;
   border: 1px solid rgba(255,255,255,.5); background: transparent; color: #fff;
   font-size: 15px; font-weight: 600; cursor: pointer; }
@@ -3897,7 +3919,8 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .start-card { width: 100%; max-width: 420px; background: var(--surface);
   border-radius: 22px; padding: 16px 18px 18px; text-align: center;
   box-shadow: 0 6px 28px rgba(0,0,0,.08); animation: pop .25s cubic-bezier(.2,.8,.2,1); }
-.start-img { width: 100%; max-width: 172px; border-radius: 14px; display: block; margin: 0 auto 8px; }
+.start-img { width: 100%; max-width: 172px; height: 172px; object-fit: contain;
+  border-radius: 14px; display: block; margin: 0 auto 8px; background: var(--surface-2, transparent); }
 .empty-img { width: 100%; max-width: 180px; display: block; margin: 0 auto 18px; }
 .start-title { color: var(--ink); font-size: 20px; font-weight: 800; letter-spacing: -0.3px; margin-bottom: 3px; }
 .start-sub { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
@@ -4155,7 +4178,9 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
   padding: 6px 0 calc(6px + env(safe-area-inset-bottom)); }
 .tab { flex: 1; border: none; background: none; cursor: pointer;
   display: flex; flex-direction: column; align-items: center; gap: 3px;
-  color: var(--muted); font-size: 11px; font-weight: 600; padding: 4px 0; }
+  color: var(--muted); font-size: 11px; font-weight: 600; padding: 4px 0; min-width: 0; }
+.tab span { white-space: nowrap; }
+@media (max-width: 400px) { .tab { font-size: 10px; } }
 .tab-on { color: var(--accent); }
 
 /* 목록 안 '새 단어 등록' 버튼 / 등록 패널 뒤로가기 */
@@ -4171,6 +4196,7 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
   padding: 28px 22px; text-align: center; min-height: 200px;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   box-shadow: 0 2px 10px rgba(0,0,0,0.03); margin-top: 8px; margin-bottom: 16px; }
+.listen-now.is-idle { min-height: 100px; padding: 18px 22px; }
 .listen-phase { font-size: 12px; font-weight: 700; color: var(--accent);
   background: var(--accent-soft); border-radius: 999px; padding: 4px 14px; margin-bottom: 14px;
   letter-spacing: .5px; line-height: 1.5; }
