@@ -978,7 +978,7 @@ function DetailModal({ card, onClose, voiceRef, allCards }) {
   const relWords = sel ? wordsWithKanji(sel, 40, allCards) : [];
   const jlptLabel = info && info.jlpt ? "N" + info.jlpt : null;
 
-  return (
+  return ReactDOM.createPortal(
     <div className="kanji-modal-overlay" onClick={onClose}>
       <div className="kanji-modal" onClick={(e) => e.stopPropagation()}>
         <div className="kanji-modal-head">
@@ -1120,7 +1120,8 @@ function DetailModal({ card, onClose, voiceRef, allCards }) {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -2266,9 +2267,10 @@ function statusKind(c) {
   return "learning";
 }
 
-function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, onDelete, voiceRef, decks, onToggleDeck, onCreateDeck }) {
+function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, onDelete, voiceRef, decks, onToggleDeck, onCreateDeck, allCards }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(null);
+  const [showDetail, setShowDetail] = useState(false); // 한자/단어 상세(DetailModal)
 
   useEffect(() => {
     // 카드가 바뀌면 편집 상태 초기화
@@ -2406,8 +2408,8 @@ function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, onDele
             </div>
 
             <div className="modal-actions">
-              <button className="modal-naver" onClick={() => openNaver(clean)}>
-                네이버 사전
+              <button className="modal-naver" onClick={() => setShowDetail(true)}>
+                상세
               </button>
               {card.suspended ? (
                 <button className="modal-resume" onClick={() => onUnsuspend(card.id)}>
@@ -2462,6 +2464,10 @@ function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, onDele
           </div>
         )}
       </div>
+      {showDetail && (
+        <DetailModal card={card} allCards={allCards}
+          voiceRef={voiceRef} onClose={() => setShowDetail(false)} />
+      )}
     </div>
   );
 }
@@ -2652,6 +2658,7 @@ function ListView({ cards, setCards, voiceRef, decks, setDecks }) {
         decks={decks}
         onToggleDeck={toggleCardDeck}
         onCreateDeck={createDeck}
+        allCards={cards}
       />
 
       {showDeckMgr && (
@@ -3827,7 +3834,7 @@ const STYLE_VARS = {};
 const CSS = `
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { overscroll-behavior-x: none; overflow-x: hidden; }
-.app {
+:root, .app {
   overscroll-behavior-x: none;
   --bg: #f2f2f7;
   --surface: #ffffff;
@@ -3843,6 +3850,8 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
   --accent-30: #B3DDF3;       /* 흰 배경 위 30% */
   --accent-soft: #E6F4FB;     /* 아주 옅은 배경용 */
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif;
+}
+.app {
   position: fixed; inset: 0;
   display: flex; flex-direction: column;
   background: var(--bg); color: var(--ink);
@@ -4479,9 +4488,10 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
   text-align: center; word-break: keep-all; }
 
 /* ===== 한자 상세 모달 ===== */
-.kanji-modal-overlay { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.4);
-  display: flex; align-items: flex-end; justify-content: center; }
-.kanji-modal { width: 100%; max-width: 480px; height: 92vh; max-height: 92vh;
+.kanji-modal-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,.4);
+  display: flex; align-items: flex-end; justify-content: center;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif; }
+.kanji-modal { width: 100%; max-width: 480px; height: 90vh; height: 90dvh; max-height: 90vh; max-height: 90dvh;
   display: flex; flex-direction: column; overflow: hidden;
   background: var(--surface); border-radius: 22px 22px 0 0;
   box-shadow: 0 -8px 40px rgba(0,0,0,.18); animation: kmUp .26s cubic-bezier(.2,.8,.2,1); }
