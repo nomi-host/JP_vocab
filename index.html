@@ -363,14 +363,14 @@ if (typeof window !== "undefined" && window.speechSynthesis) {
 }
 
 // 일본어 텍스트를 끝까지 재생 (google→내장 폴백). resolve로 끝남 알림.
-function playJaAsync(text, voiceRef, ctl, kind) {
+function playJaAsync(text, voiceRef, ctl) {
   return new Promise((resolve) => {
     if (!text || (ctl && ctl.cancelled)) return resolve();
     let done = false;
     const finish = () => { if (!done) { done = true; resolve(); } };
     speakSmart(text, voiceRef, (st) => {
       if (st === "idle" || st === "unsupported") finish();
-    }, kind || "example");
+    }, "example");
     // 안전장치: 너무 길어지면 강제 종료 (max 12초)
     setTimeout(finish, 12000);
   });
@@ -387,26 +387,17 @@ function playKoAsync(text, ctl, enabled) {
       setTimeout(resolve, 600);
       return;
     }
-    // iOS Safari: <audio>(일본어 Google TTS) 재생 직후 speechSynthesis가 무시되는
-    // 버그가 있어, cancel→resume으로 엔진을 깨운 뒤 한 박자 늦게 speak 한다.
     try { synth.cancel(); } catch {}
-    try { synth.resume(); } catch {}
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "ko-KR";
+    u.voice = voice;
+    u.rate = 1.0;
     let done = false;
     const finish = () => { if (!done) { done = true; resolve(); } };
-    const speakNow = () => {
-      if (ctl && ctl.cancelled) return finish();
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = "ko-KR";
-      u.voice = voice;
-      u.rate = 1.0;
-      u.onend = finish;
-      u.onerror = finish;
-      try { synth.speak(u); } catch { return finish(); }
-      // 일부 환경에서 onstart가 안 와도 멈추지 않도록 안전장치
-      setTimeout(finish, 10000);
-    };
-    // 60ms 지연이 audio→synthesis 전환 안정성을 크게 높인다.
-    setTimeout(speakNow, 60);
+    u.onend = finish;
+    u.onerror = finish;
+    synth.speak(u);
+    setTimeout(finish, 10000);
   });
 }
 
@@ -1499,7 +1490,7 @@ function ListenView({ cards, voiceRef, decks }) {
         if (ctl.cancelled) return;
         const firstRep = r === 0; // 한국어 뜻은 첫 회차에만 안내
         setPhase("일본어");
-        await playJaAsync(wordSpeech(card), voiceRef, ctl, "word");
+        await playJaAsync(wordSpeech(card), voiceRef, ctl);
         if (ctl.cancelled) return;
         await sleep(350, ctl);
 
