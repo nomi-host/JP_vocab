@@ -193,6 +193,29 @@ function stopAudio() {
   if (window.speechSynthesis) window.speechSynthesis.cancel();
 }
 
+/* iOS Safari는 사용자 제스처(탭) 안에서 시작된 오디오만 허용한다.
+   매번 new Audio()를 만들면 두 번째 재생부터 차단되므로(맥은 느슨해서 됨),
+   엘리먼트 하나를 만들어두고 재생 버튼을 누른 순간 unlock한 뒤 src만 바꿔 재사용한다. */
+let sharedAudio = null;
+function getSharedAudio() {
+  if (!sharedAudio) {
+    sharedAudio = new Audio();
+    sharedAudio.playbackRate = 1;
+  }
+  return sharedAudio;
+}
+// 재생 버튼(사용자 제스처) 안에서 호출해 오디오 재생 권한을 미리 확보한다.
+function unlockAudio() {
+  try {
+    const a = getSharedAudio();
+    // 무음 데이터로 한 번 play()를 호출해 권한을 얻어둔다.
+    a.muted = true;
+    const p = a.play();
+    if (p && p.then) p.then(() => { a.pause(); a.muted = false; }).catch(() => { a.muted = false; });
+    else { a.pause(); a.muted = false; }
+  } catch {}
+}
+
 /* 통합 speak: 설정에 따라 Google 우선, 실패하면 내장 음성으로 폴백.
    kind: "word"(단어, 항상 1.0x) | "example"(예문, 설정 속도) */
 function speakSmart(text, voiceRef, onState, kind) {
@@ -202,12 +225,14 @@ function speakSmart(text, voiceRef, onState, kind) {
   if (s.engine === "browser") { speak(text, voiceRef, onState, kind); return; }
   onState && onState("loading");
   fetchGoogleAudio(text, s).then((url) => {
-    const audio = new Audio(url);
+    const audio = getSharedAudio();   // 매번 새로 만들지 않고 공용 엘리먼트 재사용
     currentAudio = audio;
+    audio.muted = false;
     audio.playbackRate = 1;
     audio.onplay = () => onState && onState("playing");
     audio.onended = () => { onState && onState("idle"); if (currentAudio === audio) currentAudio = null; };
     audio.onerror = () => { onState && onState("idle"); speak(text, voiceRef, onState, kind); };
+    audio.src = url;
     audio.play().catch(() => { onState && onState("idle"); speak(text, voiceRef, onState, kind); });
   }).catch(() => {
     speak(text, voiceRef, onState, kind);
@@ -1523,6 +1548,7 @@ function ListenView({ cards, voiceRef, decks }) {
   };
 
   const start = () => {
+    unlockAudio(); // iOS: 사용자 탭 안에서 오디오 재생 권한 확보
     // 멈춰 둔 큐가 남아 있고 아직 끝나지 않았으면 그 자리에서 이어서 재생
     if (queue.length > 0 && idx < queue.length && phase !== "완료") {
       setPlaying(true);
@@ -1539,6 +1565,7 @@ function ListenView({ cards, voiceRef, decks }) {
 
   // 처음부터 새로 (범위 바꿨거나 다시 시작하고 싶을 때)
   const restart = () => {
+    unlockAudio(); // iOS: 사용자 탭 안에서 오디오 재생 권한 확보
     if (ctlRef.current) ctlRef.current.cancelled = true;
     stopAudio();
     try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
