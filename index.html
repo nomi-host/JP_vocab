@@ -189,14 +189,19 @@ function prefetchAudio(text, kind) {
 }
 
 function stopAudio() {
-  if (currentAudio) { try { currentAudio.pause(); } catch {} currentAudio = null; }
+  if (currentAudio && currentAudio !== sharedAudio) { try { currentAudio.pause(); } catch {} }
+  currentAudio = null;
   if (window.speechSynthesis) window.speechSynthesis.cancel();
 }
 
-/* iOS Safari는 사용자 제스처(탭) 안에서 시작된 오디오만 허용한다.
-   매번 new Audio()를 만들면 두 번째 재생부터 차단되므로(맥은 느슨해서 됨),
-   엘리먼트 하나를 만들어두고 재생 버튼을 누른 순간 unlock한 뒤 src만 바꿔 재사용한다. */
+/* iOS Safari는 사용자 제스처(탭) 안에서 "재생을 시작한" 오디오 엘리먼트만,
+   그 이후로도 src를 바꿔가며 계속 재생하도록 허용한다.
+   매번 new Audio()를 만들거나 중간에 완전히 pause하면 권한이 끊겨 둘째부터 막힌다(맥은 느슨해서 됨).
+   그래서 엘리먼트 하나(sharedAudio)를 만들어 재생 버튼 누른 순간 한 번 play()로 깨우고,
+   연속 듣기 동안에는 끊지 않고 src만 교체해 재사용한다. */
 let sharedAudio = null;
+// 아주 짧은 무음 MP3(base64). 재생기를 깨우는 용도.
+const SILENT_MP3 = "data:audio/mp3;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAACcQCA//////////////////////////////////////////////////////////////////8AAAA8TEFNRTMuMTAwAQ8AAAAAAAAAABRgJAUUQQAB9AAAAnGMHkkIAAAAAAAAAAAAAAAAAAAA";
 function getSharedAudio() {
   if (!sharedAudio) {
     sharedAudio = new Audio();
@@ -204,15 +209,15 @@ function getSharedAudio() {
   }
   return sharedAudio;
 }
-// 재생 버튼(사용자 제스처) 안에서 호출해 오디오 재생 권한을 미리 확보한다.
+// 재생 버튼(사용자 제스처) 안에서 호출해 오디오 재생 권한을 확보한다.
+// 무음을 한 번 재생해 엘리먼트를 "사용자가 시작한 재생" 상태로 만들어 둔다.
 function unlockAudio() {
   try {
     const a = getSharedAudio();
-    // 무음 데이터로 한 번 play()를 호출해 권한을 얻어둔다.
-    a.muted = true;
+    a.muted = false;
+    a.src = SILENT_MP3;
     const p = a.play();
-    if (p && p.then) p.then(() => { a.pause(); a.muted = false; }).catch(() => { a.muted = false; });
-    else { a.pause(); a.muted = false; }
+    if (p && p.catch) p.catch(() => {});
   } catch {}
 }
 
@@ -762,8 +767,8 @@ const Icon = {
   ),
   Cards: (p) => (
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" {...p}>
-      <rect x="3" y="8" width="13" height="11" rx="2" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M7 6h12a2 2 0 0 1 2 2v9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <rect x="4" y="9" width="12" height="10" rx="2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M8 7h10a2 2 0 0 1 2 2v8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   ),
   List: (p) => (
