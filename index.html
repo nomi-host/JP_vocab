@@ -3210,7 +3210,7 @@ function QuizView({ cards, setCards, setQuizLog }) {
   );
 }
 
-function StatsView({ cards, timeLog, quizLog, setCards, setTimeLog, setQuizLog }) {
+function StatsView({ cards, timeLog, quizLog, setCards, setTimeLog, setQuizLog, decks, setDecks }) {
   const stats = useMemo(() => {
     // 학습 횟수 합계(개별 단어 채점) / 학습한 단어 수 / 학습한 날짜 집합
     let totalKnown = 0;
@@ -3274,7 +3274,7 @@ function StatsView({ cards, timeLog, quizLog, setCards, setTimeLog, setQuizLog }
 
       <VoiceSettings />
 
-      <BackupBox cards={cards} timeLog={timeLog} setCards={setCards} setTimeLog={setTimeLog} />
+      <BackupBox cards={cards} timeLog={timeLog} setCards={setCards} setTimeLog={setTimeLog} decks={decks} setDecks={setDecks} />
     </div>
   );
 }
@@ -3424,7 +3424,7 @@ function StudyCalendar({ cards, quizLog }) {
   );
 }
 
-function BackupBox({ cards, timeLog, setCards, setTimeLog }) {
+function BackupBox({ cards, timeLog, setCards, setTimeLog, decks, setDecks }) {
   const fileRef = useRef(null);
   const [msg, setMsg] = useState("");
   const [lastBackup, setLastBackup] = useState(() => {
@@ -3443,7 +3443,7 @@ function BackupBox({ cards, timeLog, setCards, setTimeLog }) {
 
   const exportData = () => {
     try {
-      const data = { version: 1, exportedAt: new Date().toISOString(), cards, timeLog };
+      const data = { version: 2, exportedAt: new Date().toISOString(), cards, timeLog, decks };
       const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -3477,7 +3477,12 @@ function BackupBox({ cards, timeLog, setCards, setTimeLog }) {
           setTimeLog(data.timeLog);
           saveTimeLog(data.timeLog);
         }
-        setMsg(`불러오기 완료: 단어 ${data.cards.length}개`);
+        // 단어장(decks) 복원 — 구버전 백업엔 없을 수 있어 있을 때만
+        if (Array.isArray(data.decks) && setDecks) {
+          setDecks(data.decks);
+          saveDecks(data.decks);
+        }
+        setMsg(`불러오기 완료: 단어 ${data.cards.length}개${Array.isArray(data.decks) ? `, 단어장 ${data.decks.length}개` : ""}`);
         const today = todayStr();
         try { localStorage.setItem(BACKUP_KEY, today); } catch (e2) {}
         setLastBackup(today);
@@ -3831,7 +3836,7 @@ function App() {
           {tab === "listen" && <ListenView cards={cards} voiceRef={voiceRef} decks={decks} />}
           {tab === "list" && <ListView cards={cards} setCards={setCards} voiceRef={voiceRef} decks={decks} setDecks={setDecks} />}
           {tab === "quiz" && <QuizView cards={cards} setCards={setCards} setQuizLog={setQuizLog} />}
-          {tab === "stats" && <StatsView cards={cards} timeLog={timeLog} quizLog={quizLog} setCards={setCards} setTimeLog={setTimeLog} setQuizLog={setQuizLog} />}
+          {tab === "stats" && <StatsView cards={cards} timeLog={timeLog} quizLog={quizLog} setCards={setCards} setTimeLog={setTimeLog} setQuizLog={setQuizLog} decks={decks} setDecks={setDecks} />}
         </main>
       </div>
 
