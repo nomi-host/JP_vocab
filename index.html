@@ -97,7 +97,7 @@ function wordsWithKanji(ch, n, pool) {
   for (const w of src) {
     if (w.word && w.word.indexOf(ch) >= 0 && !seen.has(w.word)) {
       seen.add(w.word);
-      out.push({ word: w.word, reading: w.reading, meaning: w.meaning });
+      out.push({ word: w.word, reading: w.reading, meaning: w.meaning, card: w });
       if (out.length >= (n || 40)) break;
     }
   }
@@ -955,24 +955,37 @@ function FuriganaText({ tokens, showFuri }) {
    1) 단어 상세: 단어+읽기+뜻+품사+예문 + (한자어면) 한자 카드 목록 + 네이버/사전 링크
    2) 한자 상세: 한자 카드를 누르면 그 한자의 음훈독·부수·획수·뜻·활용단어 표시 */
 function DetailModal({ card, onClose, voiceRef, allCards }) {
-  const word = card.word;
-  const reading = card.reading;
-  const chars = kanjiInWord(word);
-  const ex = useMemo(() => getExample(card), [card.id]);
-  const posLabel = POS_LABEL[posClass(card)] || "기타";
+  // 방문 기록 스택: 각 항목 { kind:"word"|"kanji", card?, kanji? }
+  const [stack, setStack] = useState([{ kind: "word", card }]);
+  const top = stack[stack.length - 1];
+  const view = top.kind;                      // "word" | "kanji"
+  const cur = top.card || card;               // 현재(또는 직전) 단어
+  const sel = top.kanji || null;              // 한자 화면일 때 선택된 한자
 
-  const [view, setView] = useState("word");   // "word" | "kanji"
-  const [sel, setSel] = useState(chars[0] || null);
+  const word = cur.word;
+  const reading = cur.reading;
+  const chars = useMemo(() => kanjiInWord(word), [word]);
+  const ex = useMemo(() => getExample(cur), [cur.id, word]);
+  const posLabel = POS_LABEL[posClass(cur)] || "기타";
+
+  const canBack = stack.length > 1;
+  const goBack = () => { if (canBack) setStack((s) => s.slice(0, -1)); };
 
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === "Escape") { if (view === "kanji") setView("word"); else onClose(); }
+      if (e.key === "Escape") { if (canBack) goBack(); else onClose(); }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose, view]);
+  }, [onClose, canBack]);
 
-  const openKanji = (ch) => { setSel(ch); setView("kanji"); };
+  // 한자 카드 클릭 → 한자 화면을 스택에 push
+  const openKanji = (ch) => setStack((s) => [...s, { kind: "kanji", card: cur, kanji: ch }]);
+  // 활용 단어 클릭 → 그 단어 화면을 스택에 push
+  const openWord = (w) => {
+    const target = w.card || w;
+    setStack((s) => [...s, { kind: "word", card: target }]);
+  };
 
   const info = sel ? KANJI[sel] : null;
   const relWords = sel ? wordsWithKanji(sel, 40, allCards) : [];
@@ -982,8 +995,8 @@ function DetailModal({ card, onClose, voiceRef, allCards }) {
     <div className="kanji-modal-overlay" onClick={onClose}>
       <div className="kanji-modal" onClick={(e) => e.stopPropagation()}>
         <div className="kanji-modal-head">
-          {view === "kanji" ? (
-            <button className="kanji-modal-x" onClick={() => setView("word")} aria-label="뒤로"><Icon.Back /></button>
+          {canBack ? (
+            <button className="kanji-modal-x" onClick={goBack} aria-label="뒤로"><Icon.Back /></button>
           ) : <span style={{ width: 34 }} />}
           <div className="kanji-modal-title">{view === "kanji" ? (sel || word) : word}</div>
           <button className="kanji-modal-x" onClick={onClose} aria-label="닫기"><Icon.Close /></button>
@@ -993,11 +1006,11 @@ function DetailModal({ card, onClose, voiceRef, allCards }) {
           /* ===== 1단계: 단어 상세 ===== */
           <div className="kanji-modal-body word-detail">
             <button className="wd-word"
-              onClick={() => speakSmart(wordSpeech(card), voiceRef, null, "word")}
+              onClick={() => speakSmart(wordSpeech(cur), voiceRef, null, "word")}
               title="발음 듣기">
               {word}{reading ? <span className="wd-reading">{reading}</span> : null}
             </button>
-            {card.meaning && <div className="wd-meaning">{card.meaning}</div>}
+            {cur.meaning && <div className="wd-meaning">{cur.meaning}</div>}
             <div className="wd-rows">
               <div className="kanji-row">
                 <span className="kanji-row-label">품사</span>
@@ -1097,11 +1110,16 @@ function DetailModal({ card, onClose, voiceRef, allCards }) {
               <div className="kanji-related">
                 <div className="kanji-section-label">활용 단어 ({relWords.length})</div>
                 {relWords.map((w, i) => (
-                  <div key={i} className="kanji-word-row">
-                    <span className="kanji-word-main">{w.word}</span>
-                    {w.reading && <span className="kanji-word-read">{w.reading}</span>}
-                    <span className="kanji-word-mean">{w.meaning}</span>
-                  </div>
+                  <button key={i} className="kanji-word-row" onClick={() => openWord(w)}>
+                    <span className="kanji-word-text">
+                      <span className="kanji-word-line">
+                        <span className="kanji-word-main">{w.word}</span>
+                        {w.reading && <span className="kanji-word-read">{w.reading}</span>}
+                      </span>
+                      <span className="kanji-word-mean">{w.meaning}</span>
+                    </span>
+                    <span className="kanji-word-arrow"><Icon.ChevR /></span>
+                  </button>
                 ))}
               </div>
             )}
@@ -4499,7 +4517,9 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .kanji-modal-head { flex-shrink: 0; background: var(--surface);
   display: flex; align-items: center; justify-content: space-between;
   padding: 16px 20px 12px; border-bottom: 1px solid var(--line); }
-.kanji-modal-title { font-size: 20px; font-weight: 700; color: var(--ink); }
+.kanji-modal-title { font-size: 20px; font-weight: 700; color: var(--ink);
+  flex: 1; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding: 0 8px; min-width: 0; }
 .kanji-modal-x { width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
   border: none; background: var(--fill, #f2f2f7); border-radius: 50%; color: var(--ink-2); cursor: pointer; }
 .kanji-chips { flex-shrink: 0; display: flex; gap: 8px; flex-wrap: wrap; padding: 14px 20px 0; }
@@ -4507,7 +4527,7 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
   border: 1px solid var(--line); background: var(--surface); color: var(--ink);
   font-size: 22px; font-weight: 600; cursor: pointer; line-height: 1; }
 .kanji-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-.kanji-modal-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+.kanji-modal-body { flex: 1; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;
   padding: 18px 20px calc(20px + env(safe-area-inset-bottom)); text-align: center; }
 .kanji-jlpt { display: inline-block; background: var(--accent-soft); color: var(--accent-deep);
   font-size: 13px; font-weight: 700; padding: 4px 12px; border-radius: 9px; margin-bottom: 10px; }
@@ -4527,13 +4547,19 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .kanji-empty { color: var(--muted); font-size: 15px; padding: 20px 0; line-height: 1.6; word-break: keep-all; }
 .kanji-related { text-align: left; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
 .kanji-section-label { font-size: 15px; font-weight: 700; color: var(--ink); margin-bottom: 12px; }
-.kanji-word-row { display: flex; align-items: baseline; gap: 10px; padding: 11px 2px;
-  border-bottom: 1px solid var(--line); }
+.kanji-word-row { display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 12px 2px; border-bottom: 1px solid var(--line);
+  background: none; border-left: none; border-right: none; border-top: none;
+  text-align: left; cursor: pointer; }
 .kanji-word-row:last-child { border-bottom: none; }
-.kanji-word-main { font-size: 18px; font-weight: 600; color: var(--ink); flex-shrink: 0; }
-.kanji-word-read { font-size: 13px; color: var(--muted); flex-shrink: 0; }
-.kanji-word-mean { font-size: 14px; color: var(--ink-2); margin-left: auto; text-align: right;
-  word-break: keep-all; line-height: 1.5; }
+.kanji-word-row:active { background: var(--accent-soft); }
+.kanji-word-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.kanji-word-line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.kanji-word-main { font-size: 18px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.kanji-word-read { font-size: 13px; color: var(--muted); }
+.kanji-word-mean { font-size: 14px; color: var(--ink-2); line-height: 1.5;
+  word-break: keep-all; }
+.kanji-word-arrow { flex-shrink: 0; color: var(--muted); display: flex; align-items: center; }
 .kanji-modal-foot { flex-shrink: 0; display: flex; gap: 10px;
   padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--line); background: var(--surface); }
@@ -4547,8 +4573,9 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .word-detail { text-align: left; }
 .wd-word { display: block; width: 100%; text-align: left; border: none; background: none;
   cursor: pointer; padding: 4px 0 2px; font-size: 32px; font-weight: 700; color: var(--ink);
-  line-height: 1.35; word-break: keep-all; }
-.wd-reading { font-size: 18px; font-weight: 500; color: var(--muted); margin-left: 12px; }
+  line-height: 1.35; overflow-wrap: anywhere; word-break: normal; }
+.wd-reading { font-size: 18px; font-weight: 500; color: var(--muted); margin-left: 12px;
+  overflow-wrap: anywhere; }
 .wd-meaning { font-size: 18px; color: var(--ink); margin: 8px 0 18px; line-height: 1.6; word-break: keep-all; }
 .wd-rows { display: flex; flex-direction: column; gap: 10px; margin-bottom: 6px; }
 .wd-kanji-list { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--line); }
@@ -4566,7 +4593,7 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .wd-kanji-arrow { color: var(--muted); flex-shrink: 0; display: flex; align-items: center; }
 .wd-example { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--line); }
 .wd-ex-ja { display: block; width: 100%; text-align: left; border: none; background: none; cursor: pointer;
-  font-size: 20px; color: var(--ink); line-height: 1.65; word-break: keep-all; padding: 0; }
+  font-size: 20px; color: var(--ink); line-height: 1.65; overflow-wrap: anywhere; word-break: normal; padding: 0; }
 .wd-ex-ko { font-size: 15px; color: var(--ink-2); margin-top: 10px; line-height: 1.6; word-break: keep-all; }
 `;
 
