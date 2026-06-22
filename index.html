@@ -147,8 +147,8 @@ function setTtsSettings(next) { ttsSettings = next; saveTtsSettings(next); }
 const ttsCache = new Map(); // key -> objectURL
 let currentAudio = null;
 
-function cacheKey(text, s) {
-  return [text, s.gender, s.rate].join("|");
+function cacheKey(text, s, lang) {
+  return [text, s.gender, s.rate, lang || "ja"].join("|");
 }
 
 // kind에 따라 실제 사용할 설정을 만든다. 단어는 항상 1.0x(또렷하게), 예문만 설정 속도 반영.
@@ -158,13 +158,15 @@ function effSettings(kind) {
   return s;
 }
 
-async function fetchGoogleAudio(text, s) {
-  const key = cacheKey(text, s);
+async function fetchGoogleAudio(text, s, lang) {
+  const key = cacheKey(text, s, lang);
   if (ttsCache.has(key)) return ttsCache.get(key);
+  const reqBody = { text, gender: s.gender, rate: s.rate };
+  if (lang) reqBody.lang = lang; // 한국어 등 비일본어는 lang 명시(없으면 서버 기본=일본어)
   const r = await fetch(TTS_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, gender: s.gender, rate: s.rate }),
+    body: JSON.stringify(reqBody),
   });
   if (!r.ok) throw new Error("tts http " + r.status);
   const data = await r.json();
@@ -406,28 +408,49 @@ function playJaAsync(text, voiceRef, ctl) {
   });
 }
 
-// 한국어 뜻을 브라우저 내장 음성으로 재생. 음성 없거나 끔이면 약간의 텀만 두고 통과.
+// 한국어 뜻을 브라우저 내장 음성으로 재생(폴백용). 음성 없거나 끔이면 약간의 텀만 두고 통과.
+function playKoBrowser(text, ctl, resolve) {
+  const synth = window.speechSynthesis;
+  const voice = pickKoVoice();
+  if (!synth || !voice) { setTimeout(resolve, 600); return; }
+  try { synth.cancel(); } catch {}
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "ko-KR";
+  u.voice = voice;
+  u.rate = 1.0;
+  let done = false;
+  const finish = () => { if (!done) { done = true; resolve(); } };
+  u.onend = finish;
+  u.onerror = finish;
+  synth.speak(u);
+  setTimeout(finish, 10000);
+}
+
+// 한국어 뜻 재생: 일본어와 같은 공용 재생기(구글 오디오)로 재생해 iOS 자동 재생을 유지한다.
+// 구글(프록시 한국어)에 실패하면 폰 내장 음성으로 폴백한다.
 function playKoAsync(text, ctl, enabled) {
   return new Promise((resolve) => {
     if (!enabled || !text || (ctl && ctl.cancelled)) return resolve();
-    const synth = window.speechSynthesis;
-    const voice = pickKoVoice();
-    if (!synth || !voice) {
-      // 한국어 음성이 없으면 잠깐 쉬고 넘어감(화면 텍스트로는 보임)
-      setTimeout(resolve, 600);
-      return;
-    }
-    try { synth.cancel(); } catch {}
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "ko-KR";
-    u.voice = voice;
-    u.rate = 1.0;
+    // 구글 엔진이 아닐 땐 바로 내장 음성
+    if (ttsSettings.engine !== "google") { playKoBrowser(text, ctl, resolve); return; }
     let done = false;
     const finish = () => { if (!done) { done = true; resolve(); } };
-    u.onend = finish;
-    u.onerror = finish;
-    synth.speak(u);
-    setTimeout(finish, 10000);
+    const s = { ...ttsSettings, rate: 1.0 }; // 뜻은 또렷하게 1.0x
+    fetchGoogleAudio(text, s, "ko").then((url) => {
+      if (ctl && ctl.cancelled) return finish();
+      const audio = getSharedAudio();   // 일본어와 같은 재생기 → 재생 권한 유지
+      currentAudio = audio;
+      audio.muted = false;
+      audio.playbackRate = 1;
+      audio.onended = () => { if (currentAudio === audio) currentAudio = null; finish(); };
+      audio.onerror = () => { playKoBrowser(text, ctl, finish); };
+      audio.src = url;
+      audio.play().catch(() => { playKoBrowser(text, ctl, finish); });
+      setTimeout(finish, 12000);
+    }).catch(() => {
+      // 프록시가 한국어를 아직 지원 안 하면(재배포 전) 내장 음성으로
+      playKoBrowser(text, ctl, finish);
+    });
   });
 }
 
@@ -767,8 +790,8 @@ const Icon = {
   ),
   Cards: (p) => (
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" {...p}>
-      <rect x="4" y="9" width="12" height="10" rx="2" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M8 7h10a2 2 0 0 1 2 2v8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <rect x="4.7" y="8.1" width="12" height="10" rx="2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M8.95 4.85h9a2 2 0 0 1 2 2v7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   ),
   List: (p) => (
