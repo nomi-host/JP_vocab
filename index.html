@@ -806,8 +806,14 @@ function gradeCard(card, known) {
     c.box = 1;
   }
   const idx = Math.min(c.box - 1, REVIEW_INTERVALS.length - 1);
-  const days = known ? REVIEW_INTERVALS[idx] : 1;
-  c.due = dayStrFrom(Date.now() + days * DAY);
+  if (known) {
+    const days = REVIEW_INTERVALS[idx];
+    c.due = dayStrFrom(Date.now() + days * DAY);
+  } else {
+    // '다시 학습' → 오늘 안에 다시 복습 대상으로 남도록 due를 오늘로.
+    // (내일로 미루면 시작화면에서 '복습 0개'가 되어 완료처럼 보임)
+    c.due = todayStr();
+  }
   return c;
 }
 
@@ -4186,22 +4192,22 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .empty-img { width: 100%; max-width: 180px; display: block; margin: 0 auto 18px; }
 .start-title { color: var(--ink); font-size: 20px; font-weight: 800; letter-spacing: -0.3px; margin-bottom: 3px; }
 .start-sub { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
-.start-btn-primary { width: 100%; height: 50px; border-radius: 13px; border: none;
+.start-btn-primary { width: 100%; height: 48px; border-radius: 13px; border: none;
   background: var(--accent); color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; margin-bottom: 9px;
   line-height: 1.5; word-break: keep-all; }
 .start-btn-primary:disabled { opacity: .5; cursor: default; }
-.start-btn { width: 100%; height: 46px; border-radius: 13px; border: 1px solid var(--line);
+.start-btn { width: 100%; height: 48px; border-radius: 13px; border: 1px solid var(--line);
   background: var(--fill); color: var(--ink); font-size: 14px; font-weight: 600; cursor: pointer; margin-bottom: 9px;
   line-height: 1.5; word-break: keep-all; }
 .start-btn-active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .start-section-label { color: var(--ink-2); font-size: 12px; font-weight: 600; text-align: left; margin: 10px 0 6px; }
 .start-count-btns { display: flex; gap: 7px; }
-.start-count-btn { flex: 1; height: 36px; border-radius: 11px; border: 1px solid var(--accent);
-  background: var(--accent-soft); color: var(--accent); font-size: 12.5px; font-weight: 700; cursor: pointer;
+.start-count-btn { flex: 1; height: 44px; border-radius: 11px; border: 1px solid var(--accent);
+  background: var(--accent-soft); color: var(--accent); font-size: 13px; font-weight: 700; cursor: pointer;
   line-height: 1.5; }
 .start-count-btn:disabled { opacity: .5; cursor: default; }
 .start-count-btn.on { background: var(--accent); color: #fff; }
-.start-panel .start-btn-primary { height: 36px; font-size: 12.5px; margin-bottom: 0; }
+.start-panel .start-btn-primary { height: 44px; font-size: 14px; margin-bottom: 0; }
 /* 선택하여 학습 펼침 패널 */
 .start-panel { margin-top: 4px; padding: 14px; border-radius: 14px;
   background: var(--accent-soft); animation: pop .2s cubic-bezier(.2,.8,.2,1); }
