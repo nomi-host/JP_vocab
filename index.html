@@ -254,29 +254,8 @@ function unlockAudio() {
   } catch {}
 }
 
-/* ===== 백그라운드 재생(베스트에포트) =====
-   iOS Safari는 화면이 꺼지거나 앱이 백그라운드로 가면 오디오 세션을 끊는다.
-   무음 트랙을 끊김 없이 계속 재생해 두면 오디오 세션이 살아있어, 그 위로
-   단어/예문 TTS 클립을 이어 재생할 수 있다(기기·iOS 버전에 따라 100%는 아님).
-   반드시 사용자 탭(제스처) 안에서 startKeepAlive()를 호출해야 한다. */
-let keepAliveAudio = null;
-function startKeepAlive() {
-  try {
-    if (!keepAliveAudio) {
-      keepAliveAudio = new Audio(SILENT_MP3);
-      keepAliveAudio.loop = true;
-      keepAliveAudio.muted = false;
-      keepAliveAudio.volume = 1; // 내용이 무음이라 들리진 않음(세션 유지용)
-    }
-    const p = keepAliveAudio.play();
-    if (p && p.catch) p.catch(() => {});
-  } catch {}
-}
-function stopKeepAlive() {
-  try { if (keepAliveAudio) keepAliveAudio.pause(); } catch {}
-}
-
-/* 잠금화면/제어센터에 표시할 메타데이터와 컨트롤(재생·정지·이전·다음)을 등록한다. */
+/* 잠금화면/제어센터에 표시할 메타데이터와 컨트롤(재생·정지·이전·다음)을 등록한다.
+   (재생 중인 동안만 표시됨. iOS는 백그라운드에서 JS를 멈춰 클립 자동 진행은 불가.) */
 function setMediaMeta(title, artist) {
   if (!("mediaSession" in navigator) || typeof MediaMetadata === "undefined") return;
   try {
@@ -487,7 +466,8 @@ function meaningSpeech(meaning) {
   // 여러 뜻이 콤마로 나열될 때: 첫 뜻만. 단 첫 뜻이 7자 미만으로 짧으면 두 번째 뜻까지.
   const parts = s.split(/[,、]/).map((x) => x.trim()).filter(Boolean);
   if (parts.length >= 2 && parts[0].length < 7) {
-    s = (parts[0] + ", " + parts[1]).replace(/\s+/g, " ").trim();
+    // 두 뜻 사이는 온점+스페이스로 끊어 확실히 한 박자 쉬게 한다. 예) "돌아보다. 돌보다"
+    s = (parts[0] + ". " + parts[1]).replace(/\s+/g, " ").trim();
   } else {
     s = (parts[0] || s).replace(/\s+/g, " ").trim();
   }
@@ -498,8 +478,7 @@ function meaningSpeech(meaning) {
     t = t.replace(/[~～]/g, "뭐뭐").replace(/[↔≠/／]/g, " ").replace(/\s+/g, " ").trim();
     s = t;
   }
-  // 끝에 마침표를 붙여 (1) 마지막 음절이 잘리는 끝음 문제를 막고
-  // (2) 콤마(,)가 한 번 또렷이 쉬도록 문장 경계를 만든다. 예) "돌아보다, 돌보다."
+  // 끝에 마침표를 붙여 마지막 음절이 잘리는 끝음 문제를 막는다.
   if (s && !/[.。!?！？]$/.test(s)) s = s + ".";
   return s;
 }
@@ -1879,7 +1858,7 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession, de
 
 /* ===================== 연속 듣기 뷰 ===================== */
 const LISTEN_KEY = "jp-vocab-listen-v1";
-const defaultListenSettings = { koVoice: true, repeat: 2, src: "today", cat: "", limit: 30, keepAwake: true };
+const defaultListenSettings = { mode: "study", koVoice: true, repeat: 2, src: "today", cat: "", limit: 30 };
 
 // 재생 세션(어떤 단어들을 어디까지 듣고 있었는지)을 저장해 둔다.
 // 다른 탭/앱에 갔다 오거나 새로고침으로 페이지가 다시 떠도, 같은 세션을 이어 들을 수 있게.
@@ -1902,6 +1881,135 @@ function saveListenSession(ids, idx) {
 function clearListenSession() {
   try { localStorage.removeItem(LISTEN_SESSION_KEY); } catch {}
 }
+
+/* ============================================================================
+   백그라운드(음성만) 재생용 — 큐 전체를 단일 MP3로 "구워서" 재생.
+   iOS Safari는 백그라운드/잠금에서 JS를 멈춰 클립을 이어 재생하지 못한다.
+   하지만 '연속 재생 중인 단일 미디어'는 백그라운드에서도 계속 재생되므로,
+   세그먼트(단어/뜻/예문/예문뜻)들을 미리 모두 합성해 하나의 MP3로 이어붙인다.
+   구운 결과는 IndexedDB(폰 저장소)에 캐시해 재생 즉시·재합성 0으로 만든다.
+============================================================================ */
+
+// --- IndexedDB blob 캐시 ---
+const IDB_NAME = "jp-vocab-audio", IDB_STORE = "bakes";
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    try {
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = () => { try { req.result.createObjectStore(IDB_STORE); } catch {} };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    } catch (e) { reject(e); }
+  });
+}
+async function idbGet(key) {
+  try {
+    const db = await idbOpen();
+    return await new Promise((res) => {
+      const r = db.transaction(IDB_STORE, "readonly").objectStore(IDB_STORE).get(key);
+      r.onsuccess = () => res(r.result || null);
+      r.onerror = () => res(null);
+    });
+  } catch { return null; }
+}
+async function idbSet(key, blob) {
+  try {
+    const db = await idbOpen();
+    await new Promise((res) => {
+      const r = db.transaction(IDB_STORE, "readwrite").objectStore(IDB_STORE).put(blob, key);
+      r.onsuccess = () => res(); r.onerror = () => res();
+    });
+  } catch {}
+}
+
+// TTS 한 세그먼트를 MP3 바이트로 받는다(굽기 전용: 캐시/랜덤 건너뜀 없이 직접 호출).
+async function fetchTtsBytes(text, gender, rate, lang) {
+  const r = await fetch(TTS_URL, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, gender, rate, lang: lang || "ja" }),
+  });
+  if (!r.ok) throw new Error("tts " + r.status);
+  const data = await r.json();
+  if (!data || !data.audio) throw new Error("no audio");
+  const bin = atob(data.audio);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+// 세그먼트 사이에 끼울 무음 MP3 바이트(짧은 텀). SILENT_MP3(data URL)에서 추출.
+function silentBytes() {
+  try {
+    const b64 = SILENT_MP3.split(",")[1];
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  } catch { return new Uint8Array(0); }
+}
+
+// 굽기용 성별 고정값(랜덤이면 목소리가 세그먼트마다 달라지므로 하나로 고정).
+function bakeGender() {
+  const g = (ttsSettings && ttsSettings.gender) || "female";
+  return (g === "male" || g === "female") ? g : "female";
+}
+
+// 카드 큐 → 재생 순서대로의 세그먼트 계획 [{text, lang, kind, brk}].
+// brk: 세그먼트 뒤 무음 단위 수(1=보통 텀, 2=카드 사이 더 긴 텀).
+function bakeSegmentPlan(cards, repeat, koVoice) {
+  const plan = [];
+  const reps = Math.max(1, repeat || 1);
+  for (const card of cards) {
+    for (let r = 0; r < reps; r++) {
+      const first = r === 0;
+      plan.push({ text: wordSpeech(card), lang: "ja", kind: "word", brk: 1 });
+      if (first && koVoice) plan.push({ text: meaningSpeech(card.meaning), lang: "ko", kind: "mean", brk: 1 });
+      const ex = card.ex;
+      if (ex && (ex.ja || (ex.tokens && ex.tokens.length))) {
+        plan.push({ text: exampleSpeech(ex), lang: "ja", kind: "ex", brk: 1 });
+        if (first && koVoice && ex.ko) plan.push({ text: ex.ko, lang: "ko", kind: "exko", brk: 1 });
+      }
+    }
+    if (plan.length) plan[plan.length - 1].brk = 3; // 카드 사이는 더 길게 쉼
+  }
+  return plan.filter((s) => s.text && s.text.trim());
+}
+
+// 큐를 단일 MP3 Blob으로 굽는다. onProgress(done,total)로 진행 보고.
+async function bakeQueue(cards, opts, onProgress, isCancelled) {
+  const { repeat, koVoice, rate } = opts;
+  const gender = bakeGender();
+  const plan = bakeSegmentPlan(cards, repeat, koVoice);
+  // 같은 (lang,rate,text)는 한 번만 합성 (반복 회차/중복 단어 절약)
+  const segRateOf = (s) => (s.kind === "word" ? 1.0 : rate);
+  const keyOf = (s) => s.lang + "|" + segRateOf(s) + "|" + s.text;
+  const uniq = []; const seen = new Set();
+  for (const s of plan) { const k = keyOf(s); if (!seen.has(k)) { seen.add(k); uniq.push({ k, text: s.text, lang: s.lang, rate: segRateOf(s) }); } }
+  const bytesByKey = new Map();
+  let done = 0;
+  // 동시 6개씩 병렬 페치
+  const CONC = 6; let i = 0;
+  async function worker() {
+    while (i < uniq.length) {
+      if (isCancelled && isCancelled()) return;
+      const job = uniq[i++];
+      try { bytesByKey.set(job.k, await fetchTtsBytes(job.text, gender, job.rate, job.lang)); }
+      catch { bytesByKey.set(job.k, new Uint8Array(0)); }
+      done++; onProgress && onProgress(done, uniq.length);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONC, uniq.length) }, worker));
+  if (isCancelled && isCancelled()) return null;
+  // 순서대로 이어붙이기 + 사이 무음
+  const sil = silentBytes();
+  const parts = [];
+  for (const s of plan) {
+    const b = bytesByKey.get(keyOf(s));
+    if (b && b.length) parts.push(b);
+    for (let n = 0; n < (s.brk || 1); n++) parts.push(sil);
+  }
+  return new Blob(parts, { type: "audio/mpeg" });
+}
+
 function loadListenSettings() {
   try {
     const raw = localStorage.getItem(LISTEN_KEY);
@@ -1935,6 +2043,93 @@ function ListenView({ cards, voiceRef, decks }) {
 
   const update = (patch) => {
     setCfg((prev) => { const next = { ...prev, ...patch }; saveListenSettings(next); return next; });
+  };
+
+  // ===== 백그라운드(음성만) 모드 상태 =====
+  const [bgState, setBgState] = useState("idle"); // idle|baking|playing|paused|done
+  const [bakeMsg, setBakeMsg] = useState("");
+  const [bgTime, setBgTime] = useState(0);
+  const [bgDur, setBgDur] = useState(0);
+  const bgUrlRef = useRef(null);
+  const bgCancelRef = useRef(false);
+  const bgCountRef = useRef(0);
+  const BG_COUNT = 30; // 백그라운드 모드는 한 묶음 30단어 고정
+
+  const fmtClock = (s) => { s = Math.max(0, Math.floor(s || 0)); const m = Math.floor(s / 60), ss = s % 60; return m + ":" + (ss < 10 ? "0" : "") + ss; };
+
+  // 백그라운드 묶음 단어 고르기: 하루 단위 고정 시드 → 같은 날·범위면 같은 30단어(캐시 적중)
+  const buildBgList = () => {
+    let pool;
+    if (cfg.src === "today") pool = buildQueue(cards);
+    else if (cfg.src === "cat") { const f = selToFilter(cfg.cat); pool = cards.filter((c) => !c.suspended && (f ? f(c) : true)); }
+    else pool = cards.filter((c) => !c.suspended && c.introducedOn);
+    const daySeed = Math.floor(Date.now() / 86400000);
+    return seededShuffle(pool, daySeed).slice(0, BG_COUNT);
+  };
+  const bgKeyFor = (list) =>
+    "bg|v1|" + list.map((c) => c.id).join(".") + "|r" + (cfg.repeat || 1) +
+    "|ko" + (cfg.koVoice ? 1 : 0) + "|" + bakeGender() + "|" + (ttsSettings.rate || 0.95);
+
+  const playBgBlob = (blob, count) => {
+    try { if (bgUrlRef.current) URL.revokeObjectURL(bgUrlRef.current); } catch {}
+    const url = URL.createObjectURL(blob);
+    bgUrlRef.current = url;
+    const a = getSharedAudio();
+    currentAudio = a;
+    a.muted = false; a.playbackRate = 1; a.loop = false;
+    a.ontimeupdate = () => { setBgTime(a.currentTime || 0); if (a.duration && isFinite(a.duration)) setBgDur(a.duration); };
+    a.onloadedmetadata = () => { if (a.duration && isFinite(a.duration)) setBgDur(a.duration); };
+    a.onplay = () => { setBgState("playing"); setMediaPlaybackState("playing"); };
+    a.onended = () => { setBgState("done"); setMediaPlaybackState("none"); };
+    a.onerror = () => { setBgState("idle"); setBakeMsg("재생 오류가 났어요. 다시 시도해 주세요."); };
+    setMediaMeta("연속 듣기 (" + count + "단어)", "일본어 단어장");
+    a.src = url;
+    a.play().catch(() => { setBgState("idle"); setBakeMsg("재생을 시작할 수 없어요. 다시 눌러주세요."); });
+  };
+
+  const bgStart = async () => {
+    unlockAudio(); // 제스처 안에서 공용 오디오 깨우기(굽기 후 재생 허용되도록)
+    const a = getSharedAudio();
+    if (bgState === "paused") { a.play().catch(() => {}); setBgState("playing"); setMediaPlaybackState("playing"); return; }
+    const list = buildBgList();
+    if (list.length === 0) { setBakeMsg("재생할 단어가 없어요"); setBgState("idle"); return; }
+    bgCountRef.current = list.length;
+    const key = bgKeyFor(list);
+    bgCancelRef.current = false;
+    setBgState("baking"); setBakeMsg("음성 준비 중…"); setBgTime(0); setBgDur(0);
+    let blob = await idbGet(key); // 폰 캐시 먼저
+    if (bgCancelRef.current) return;
+    if (!blob) {
+      blob = await bakeQueue(
+        list,
+        { repeat: cfg.repeat || 1, koVoice: cfg.koVoice, rate: ttsSettings.rate || 0.95 },
+        (d, t) => { if (!bgCancelRef.current) setBakeMsg("음성 준비 중… " + d + "/" + t); },
+        () => bgCancelRef.current
+      );
+      if (bgCancelRef.current || !blob) return;
+      idbSet(key, blob); // 폰에 캐시(다음엔 즉시 재생)
+    }
+    if (bgCancelRef.current) return;
+    playBgBlob(blob, list.length);
+  };
+  const bgPause = () => { try { getSharedAudio().pause(); } catch {} setBgState("paused"); setMediaPlaybackState("paused"); };
+  const bgSeek = (delta) => { try { const a = getSharedAudio(); a.currentTime = Math.max(0, Math.min(a.duration || 0, (a.currentTime || 0) + delta)); } catch {} };
+  const bgStop = () => {
+    bgCancelRef.current = true;
+    try { const a = getSharedAudio(); a.pause(); a.ontimeupdate = a.onended = a.onerror = a.onplay = null; } catch {}
+    try { if (bgUrlRef.current) { URL.revokeObjectURL(bgUrlRef.current); bgUrlRef.current = null; } } catch {}
+    setBgState("idle"); setBakeMsg(""); setBgTime(0); setBgDur(0); setMediaPlaybackState("none");
+  };
+
+  // 모드 전환: 양쪽 재생을 모두 멈추고 깔끔히 초기화
+  const changeMode = (m) => {
+    if (ctlRef.current) ctlRef.current.cancelled = true;
+    stopAudio(true);
+    try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
+    setPlaying(false);
+    bgStop();
+    setQueue([]); setIdx(0); setPhase("");
+    update({ mode: m });
   };
 
   // 소스/카테고리에 따라 재생할 카드 모으기
@@ -2000,13 +2195,12 @@ function ListenView({ cards, voiceRef, decks }) {
       await sleep(500, ctl); // 카드 사이 텀
     }
     // 끝까지 재생 완료
-    if (!ctl.cancelled) { setPlaying(false); setPhase("완료"); clearListenSession(); stopKeepAlive(); setMediaPlaybackState("none"); }
+    if (!ctl.cancelled) { setPlaying(false); setPhase("완료"); clearListenSession(); setMediaPlaybackState("none"); }
   };
 
   const start = () => {
     unlockAudio(); // iOS: 사용자 탭 안에서 오디오 재생 권한 확보
-    startKeepAlive(); // 화면 꺼져도 이어 재생되도록 무음 세션 유지(베스트에포트)
-    if (ctlRef.current) ctlRef.current.cancelled = true; // 백그라운드에 얼어있던 이전 루프 중복 방지
+    if (ctlRef.current) ctlRef.current.cancelled = true; // 이전 루프 중복 방지
     // 멈춰 둔 큐가 남아 있고 아직 끝나지 않았으면 그 자리에서 이어서 재생
     if (queue.length > 0 && idx < queue.length && phase !== "완료") {
       setPlaying(true);
@@ -2024,7 +2218,6 @@ function ListenView({ cards, voiceRef, decks }) {
   // 처음부터 새로 (범위 바꿨거나 다시 시작하고 싶을 때)
   const restart = () => {
     unlockAudio(); // iOS: 사용자 탭 안에서 오디오 재생 권한 확보
-    startKeepAlive();
     if (ctlRef.current) ctlRef.current.cancelled = true;
     stopAudio(true);
     try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
@@ -2041,7 +2234,6 @@ function ListenView({ cards, voiceRef, decks }) {
     if (ctlRef.current) ctlRef.current.cancelled = true;
     stopAudio(true);
     try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
-    stopKeepAlive();
     setMediaPlaybackState("paused");
     setPlaying(false);
   };
@@ -2049,6 +2241,7 @@ function ListenView({ cards, voiceRef, decks }) {
   // 범위/카테고리를 바꾸면 멈추고 큐를 비워, 다음 재생 때 새 범위로 처음부터 시작
   const changeScope = (patch) => {
     stop();
+    bgStop(); // 백그라운드 모드도 리셋(범위 바뀌면 다시 구워야 함)
     clearListenSession(); // 범위가 바뀌면 이전 이어듣기 세션은 버린다
     setQueue([]);
     setIdx(0);
@@ -2078,7 +2271,9 @@ function ListenView({ cards, voiceRef, decks }) {
   // 잠금화면/제어센터 컨트롤이 호출할 최신 동작들을 ref에 담아둔다.
   // (start/stop/prev/next는 매 렌더 새로 생기므로 ref로 항상 최신을 가리키게 함)
   const actionsRef = useRef({});
-  actionsRef.current = { play: start, pause: stop, prev, next };
+  actionsRef.current = cfg.mode === "bg"
+    ? { play: bgStart, pause: bgPause, prev: () => bgSeek(-15), next: () => bgSeek(15) }
+    : { play: start, pause: stop, prev, next };
 
   // 잠금화면 재생/정지/이전/다음 컨트롤 등록 (마운트 시 1회).
   // MediaSession 핸들러는 iOS에서 사용자 제스처로 취급돼 백그라운드에서도 재생을 깨운다.
@@ -2093,13 +2288,14 @@ function ListenView({ cards, voiceRef, decks }) {
     return () => { ["play", "pause", "previoustrack", "nexttrack"].forEach((a) => bind(a, null)); };
   }, []);
 
-  // 탭을 떠나거나 언마운트되면 재생 정지
+  // 탭을 떠나거나 언마운트되면 재생 정지 (양 모드 모두)
   useEffect(() => {
     return () => {
       if (ctlRef.current) ctlRef.current.cancelled = true;
+      bgCancelRef.current = true;
       stopAudio(true);
       try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
-      stopKeepAlive();
+      try { if (bgUrlRef.current) { URL.revokeObjectURL(bgUrlRef.current); bgUrlRef.current = null; } } catch {}
       setMediaPlaybackState("none");
     };
   }, []);
@@ -2118,24 +2314,29 @@ function ListenView({ cards, voiceRef, decks }) {
     setPhase(""); // '완료'가 아니므로 재생 버튼이 '이어 재생'으로 표시됨
   }, []);
 
-  // [백그라운드 재생] 화면이 꺼지거나 앱이 백그라운드로 가도 재생을 끊지 않는다.
-  // 무음 keepalive 트랙으로 오디오 세션을 살려두면 그 위로 TTS가 이어 재생된다(베스트에포트).
-  // iOS가 그래도 멈추면, 잠금화면 컨트롤(▶)이나 앱 복귀 후 재생 버튼으로 이어 들으면 된다.
-  // 복귀 시 keepalive가 끊겼을 수 있어 다시 깨워 둔다.
+  // [공부 모드만] 화면이 꺼지거나 앱이 백그라운드로 가면 iOS가 JS·소리를 멈춘다.
+  // 깔끔하게 일시정지하고, 큐/위치는 세션에 저장돼 있으므로 돌아오면 '이어 재생'으로 재개.
+  // (백그라운드 모드는 단일 MP3라 그대로 계속 재생되어야 하므로 멈추지 않는다.)
   useEffect(() => {
-    const onShow = () => {
-      if (!document.hidden && playing) startKeepAlive();
+    const onHide = () => {
+      if (document.hidden && cfg.mode === "study") {
+        if (ctlRef.current) ctlRef.current.cancelled = true;
+        stopAudio(true);
+        try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
+        setMediaPlaybackState("paused");
+        setPlaying(false);
+      }
     };
-    document.addEventListener("visibilitychange", onShow);
-    return () => document.removeEventListener("visibilitychange", onShow);
-  }, [playing]);
+    document.addEventListener("visibilitychange", onHide);
+    return () => document.removeEventListener("visibilitychange", onHide);
+  }, [cfg.mode]);
 
-  // 재생 중에는 화면이 자동으로 꺼지지 않도록 Wake Lock을 건다. (토글 ON일 때만)
-  // (iOS Safari 16.4+ 지원. 미지원 기기면 조용히 무시되고 평소처럼 동작.)
+  // [공부 모드] 재생 중에는 화면이 자동으로 꺼지지 않도록 Wake Lock(항상 켜둠).
+  // (iOS Safari 16.4+ 지원. 미지원 기기면 조용히 무시.)
   useEffect(() => {
     const request = async () => {
       try {
-        if (playing && cfg.keepAwake && !document.hidden && navigator.wakeLock && !wakeLockRef.current) {
+        if (cfg.mode === "study" && playing && !document.hidden && navigator.wakeLock && !wakeLockRef.current) {
           const wl = await navigator.wakeLock.request("screen");
           wakeLockRef.current = wl;
           wl.addEventListener("release", () => { wakeLockRef.current = null; });
@@ -2145,25 +2346,79 @@ function ListenView({ cards, voiceRef, decks }) {
     const release = async () => {
       try { if (wakeLockRef.current) { await wakeLockRef.current.release(); wakeLockRef.current = null; } } catch {}
     };
-    if (playing && cfg.keepAwake) request(); else release();
-    // 화면 복귀 시 자동 해제된 Wake Lock을 다시 요청
-    const onVis = () => { if (!document.hidden && playing && cfg.keepAwake) request(); };
+    if (cfg.mode === "study" && playing) request(); else release();
+    const onVis = () => { if (!document.hidden && cfg.mode === "study" && playing) request(); };
     document.addEventListener("visibilitychange", onVis);
     return () => {
       document.removeEventListener("visibilitychange", onVis);
       release();
     };
-  }, [playing, cfg.keepAwake]);
+  }, [playing, cfg.mode]);
 
   // 재생 중이거나 이어들을 큐가 남아 있으면 현재 카드를 최신 내용으로 보여준다.
   const cur = (queue[idx] && phase !== "완료") ? freshCard(queue[idx]) : null;
   const koVoiceAvailable = !!pickKoVoice();
 
+  const ScopeSelect = (
+    <>
+      <div className="start-section-label">무엇을 들을까요?</div>
+      <select className="start-select" value={cfg.src}
+        onChange={(e) => changeScope({ src: e.target.value })}>
+        <option value="today">오늘 학습 단어</option>
+        <option value="all">배운 단어 전체</option>
+        <option value="cat">카테고리·단어장</option>
+      </select>
+      {cfg.src === "cat" && (
+        <select className="start-select" style={{ marginTop: 8 }} value={cfg.cat}
+          onChange={(e) => changeScope({ cat: e.target.value })}>
+          <option value="">분류 선택…</option>
+          <option value="pos:mimetic">의성·의태어 ({cards.filter((c) => !c.suspended && posClass(c) === "mimetic").length})</option>
+          {decks && decks.length > 0 && (
+            <optgroup label="내 단어장">
+              {decks.map((d) => {
+                const n = cards.filter((c) => (c.decks || []).includes(d.id)).length;
+                return <option key={d.id} value={"deck:" + d.id}>{d.name} ({n})</option>;
+              })}
+            </optgroup>
+          )}
+        </select>
+      )}
+    </>
+  );
+  const KoVoiceToggle = (
+    <div className="listen-opt-row">
+      <div className="listen-opt-text">
+        <div className="listen-opt-title">한국어 뜻 음성</div>
+        <div className="listen-opt-sub">
+          {koVoiceAvailable ? "뜻을 한국어 음성으로 읽어줍니다" : "이 기기에 한국어 음성이 없어 화면 글자로만 표시돼요"}
+        </div>
+      </div>
+      <button className={"listen-toggle" + (cfg.koVoice ? " on" : "")}
+        onClick={() => { if (cfg.mode === "bg") bgStop(); update({ koVoice: !cfg.koVoice }); }}>
+        <span className="listen-toggle-knob" />
+      </button>
+    </div>
+  );
+
   return (
     <div className="listen">
       <h2 className="view-title">연속 듣기</h2>
 
-      {/* 현재 재생 카드 표시 */}
+      {/* 모드 선택 */}
+      <div className="listen-mode">
+        <button className={"listen-mode-btn" + (cfg.mode === "study" ? " on" : "")}
+          onClick={() => cfg.mode !== "study" && changeMode("study")}>
+          화면 보면서 공부하기
+        </button>
+        <button className={"listen-mode-btn" + (cfg.mode === "bg" ? " on" : "")}
+          onClick={() => cfg.mode !== "bg" && changeMode("bg")}>
+          백그라운드 음성만
+        </button>
+      </div>
+
+      {cfg.mode === "study" ? (
+      <>
+      {/* ===== 화면 보면서 공부하기 ===== */}
       <div className={"listen-now" + (cur ? "" : " is-idle")}>
         {cur ? (
           <>
@@ -2193,7 +2448,6 @@ function ListenView({ cards, voiceRef, decks }) {
         )}
       </div>
 
-      {/* 컨트롤 */}
       <div className="listen-controls">
         <button className="listen-prev" onClick={prev} disabled={queue.length === 0}>
           <span style={{ display: "inline-flex", transform: "scaleX(-1)" }}><Icon.Next /></span> 이전
@@ -2211,34 +2465,9 @@ function ListenView({ cards, voiceRef, decks }) {
         <button className="listen-restart" onClick={restart}>처음부터 다시</button>
       )}
 
-      {/* 설정 영역: 재생 중에는 접어서 화면을 단순하게 */}
       {!playing && (
       <>
-      {/* 범위 선택 (드롭다운) */}
-      <div className="start-section-label">무엇을 들을까요?</div>
-      <select className="start-select" value={cfg.src}
-        onChange={(e) => changeScope({ src: e.target.value })}>
-        <option value="today">오늘 학습 단어</option>
-        <option value="all">배운 단어 전체</option>
-        <option value="cat">카테고리·단어장</option>
-      </select>
-      {cfg.src === "cat" && (
-        <select className="start-select" style={{ marginTop: 8 }} value={cfg.cat}
-          onChange={(e) => changeScope({ cat: e.target.value })}>
-          <option value="">분류 선택…</option>
-          <option value="pos:mimetic">의성·의태어 ({cards.filter((c) => !c.suspended && posClass(c) === "mimetic").length})</option>
-          {decks && decks.length > 0 && (
-            <optgroup label="내 단어장">
-              {decks.map((d) => {
-                const n = cards.filter((c) => (c.decks || []).includes(d.id)).length;
-                return <option key={d.id} value={"deck:" + d.id}>{d.name} ({n})</option>;
-              })}
-            </optgroup>
-          )}
-        </select>
-      )}
-
-      {/* 단어 개수 (드롭다운) */}
+      {ScopeSelect}
       <div className="start-section-label">단어 개수</div>
       <select className="start-select" value={cfg.limit}
         onChange={(e) => changeScope({ limit: Number(e.target.value) })}>
@@ -2247,43 +2476,89 @@ function ListenView({ cards, voiceRef, decks }) {
         <option value={100}>100개</option>
         <option value={0}>전체</option>
       </select>
-
-      {/* 반복 횟수 (드롭다운, 1~5회) */}
       <div className="start-section-label">반복 횟수</div>
       <select className="start-select" value={cfg.repeat}
         onChange={(e) => update({ repeat: Number(e.target.value) })}>
-        {[1, 2, 3, 4, 5].map((n) => (
-          <option key={n} value={n}>{n}번 반복</option>
-        ))}
+        {[1, 2, 3, 4, 5].map((n) => (<option key={n} value={n}>{n}번 반복</option>))}
       </select>
-
-      <div className="listen-opt-row">
-        <div className="listen-opt-text">
-          <div className="listen-opt-title">한국어 뜻 음성</div>
-          <div className="listen-opt-sub">
-            {koVoiceAvailable ? "뜻을 한국어 음성으로 읽어줍니다" : "이 기기에 한국어 음성이 없어 화면 글자로만 표시돼요"}
-          </div>
-        </div>
-        <button className={"listen-toggle" + (cfg.koVoice ? " on" : "")}
-          onClick={() => update({ koVoice: !cfg.koVoice })}>
-          <span className="listen-toggle-knob" />
-        </button>
-      </div>
-
-      <div className="listen-opt-row listen-opt-row-tight">
-        <div className="listen-opt-text">
-          <div className="listen-opt-title">재생 중 화면 켜두기</div>
-          <div className="listen-opt-sub">듣는 동안 화면이 자동으로 꺼지지 않아요 (배터리를 더 씁니다)</div>
-        </div>
-        <button className={"listen-toggle" + (cfg.keepAwake ? " on" : "")}
-          onClick={() => update({ keepAwake: !cfg.keepAwake })}>
-          <span className="listen-toggle-knob" />
-        </button>
-      </div>
-
+      {KoVoiceToggle}
       <div className="listen-note">
-        화면이 꺼지거나 다른 앱으로 가도 이어서 들을 수 있어요(기기에 따라 다름). 잠금화면의 ▶·⏭ 컨트롤로도 조작할 수 있고, 멈추면 재생 버튼으로 다시 이어집니다.
+        듣는 동안 화면은 자동으로 켜져 있어요. 화면을 끄거나 다른 앱으로 가면 멈추고, 돌아와 재생 버튼을 누르면 멈춘 자리부터 이어집니다.
       </div>
+      </>
+      )}
+      </>
+      ) : (
+      <>
+      {/* ===== 백그라운드 음성만 ===== */}
+      <div className={"listen-now" + (bgState === "playing" || bgState === "paused" ? "" : " is-idle")}>
+        {bgState === "baking" ? (
+          <div className="listen-idle">
+            <div className="listen-phase">{bakeMsg || "음성 준비 중…"}</div>
+            <div className="listen-hint">준비가 끝나면 자동 재생돼요. 준비 중엔 화면을 켜두세요.</div>
+          </div>
+        ) : (bgState === "playing" || bgState === "paused") ? (
+          <>
+            <div className="listen-word" style={{ fontSize: 22 }}>{bgState === "paused" ? "일시정지" : "재생 중"} · {bgCountRef.current}단어</div>
+            <div className="listen-progress-bar" style={{ marginTop: 14 }}>
+              <div className="listen-progress-fill" style={{ width: (bgDur > 0 ? (bgTime / bgDur * 100) : 0) + "%" }} />
+            </div>
+            <div className="listen-progress">{fmtClock(bgTime)} / {bgDur > 0 ? fmtClock(bgDur) : "--:--"}</div>
+          </>
+        ) : (
+          <div className="listen-idle">
+            {bgState === "done"
+              ? <div className="listen-phase">완료</div>
+              : <div className="listen-hint">{bakeMsg || "범위·반복을 고르고 재생하세요"}</div>}
+          </div>
+        )}
+      </div>
+
+      <div className="listen-controls">
+        {bgState === "playing" ? (
+          <>
+            <button className="listen-prev" onClick={() => bgSeek(-15)}>
+              <span style={{ display: "inline-flex", transform: "scaleX(-1)" }}><Icon.Next /></span> 15초
+            </button>
+            <button className="listen-play listen-stop" onClick={bgPause}><Icon.Pause /> 일시정지</button>
+            <button className="listen-next" onClick={() => bgSeek(15)}><Icon.Next /> 15초</button>
+          </>
+        ) : bgState === "paused" ? (
+          <>
+            <button className="listen-prev" onClick={() => bgSeek(-15)}>
+              <span style={{ display: "inline-flex", transform: "scaleX(-1)" }}><Icon.Next /></span> 15초
+            </button>
+            <button className="listen-play" onClick={bgStart}><Icon.Play /> 이어 재생</button>
+            <button className="listen-next" onClick={() => bgSeek(15)}><Icon.Next /> 15초</button>
+          </>
+        ) : bgState === "baking" ? (
+          <button className="listen-play listen-stop" onClick={bgStop}><Icon.Pause /> 준비 취소</button>
+        ) : (
+          <button className="listen-play" onClick={bgStart}><Icon.Play /> {bgState === "done" ? "다시 재생" : "재생"}</button>
+        )}
+      </div>
+      {(bgState === "playing" || bgState === "paused" || bgState === "done") && (
+        <button className="listen-restart" onClick={bgStop}>정지하고 처음으로</button>
+      )}
+
+      {(bgState === "idle" || bgState === "done") && (
+      <>
+      {ScopeSelect}
+      <div className="start-section-label">단어 개수</div>
+      <select className="start-select" value={30} disabled>
+        <option value={30}>30개 (고정)</option>
+      </select>
+      <div className="start-section-label">반복 횟수</div>
+      <select className="start-select" value={cfg.repeat}
+        onChange={(e) => { bgStop(); update({ repeat: Number(e.target.value) }); }}>
+        {[1, 2, 3, 4, 5].map((n) => (<option key={n} value={n}>{n}번 반복</option>))}
+      </select>
+      {KoVoiceToggle}
+      <div className="listen-note">
+        재생을 누르면 음성을 미리 만든 뒤(약 10~30초) 하나로 이어 재생해요. 재생이 시작된 다음에는 <b>화면을 꺼도, 다른 앱으로 가도 계속 들립니다.</b> 잠금화면의 ▶·⏸로도 조작돼요. (만든 음성은 폰에 저장돼 다음엔 즉시 재생)
+      </div>
+      </>
+      )}
       </>
       )}
     </div>
@@ -4723,6 +4998,14 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .listen-restart { width: 100%; height: 36px; border-radius: 11px; border: none; cursor: pointer;
   background: none; color: var(--ink-2); font-size: 13px; font-weight: 600; margin-bottom: 4px;
   text-decoration: underline; text-underline-offset: 3px; }
+
+/* 듣기 모드 선택(공부 / 백그라운드) */
+.listen-mode { display: flex; gap: 8px; margin-bottom: 14px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 14px; padding: 5px; }
+.listen-mode-btn { flex: 1; min-height: 42px; border: none; border-radius: 10px; cursor: pointer;
+  background: none; color: var(--ink-2); font-size: 13.5px; font-weight: 700; word-break: keep-all;
+  padding: 6px 8px; line-height: 1.3; }
+.listen-mode-btn.on { background: var(--accent); color: #fff; }
 
 .listen-src { display: flex; gap: 7px; flex-wrap: wrap; }
 .listen-src-btn { flex: 1; min-width: 90px; min-height: 40px; padding: 6px 10px; border-radius: 11px;
