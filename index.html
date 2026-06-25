@@ -1526,6 +1526,22 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession, de
   const [showSelect, setShowSelect] = useState(false); // '선택하여 학습' 패널 펼침
   const [selMode, setSelMode] = useState("new"); // 선택학습 모드: new(새단어) / cat(카테고리)
 
+  // 학습 큐를 '현재 세션에 이어붙이기'(진행 중이면) 또는 새로 시작.
+  // 추가학습 시 총량이 늘어나도록: 예) 오늘 30개 끝내고 10개 더 → 30/40, 그것도 끝내면 40/40.
+  // 이미 큐에 있는 카드는 중복으로 안 더한다. 진행 위치(pos)·완료수는 유지.
+  const mergeOrStart = (ids) => {
+    setExtraMsg("");
+    setSeconds(0);
+    setSession((prev) => {
+      if (prev && prev.queue && prev.queue.length) {
+        const have = new Set(prev.queue);
+        const add = ids.filter((id) => !have.has(id));
+        return { ...prev, queue: [...prev.queue, ...add], total: prev.total + add.length, started: true, done: false, dismissed: false };
+      }
+      return { queue: ids, pos: 0, doneCount: 0, total: ids.length, extraLimit: NEW_PER_DAY, started: true, done: false, dismissed: false };
+    });
+  };
+
   // 새 단어 학습: N개만큼 신규 카드를 추가로 학습 (10개 단위 선택)
   const startExtra = (count) => {
     const fresh = cardsRef.current.filter((c) => !c.suspended && !c.introducedOn);
@@ -1535,10 +1551,7 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession, de
     }
     const n = Math.min(count, fresh.length);
     const picked = seededShuffle(fresh, Date.now() | 0).slice(0, n);
-    const q = picked.map((c) => c.id);
-    setExtraMsg("");
-    setSeconds(0);
-    setSession({ queue: q, pos: 0, doneCount: 0, total: q.length, extraLimit: NEW_PER_DAY, started: true, done: false, dismissed: false });
+    mergeOrStart(picked.map((c) => c.id));
   };
 
   // 다시 학습(복습): 이미 학습한 카드를 다시 학습. (선택) 분류·개수 지정 가능
@@ -1550,9 +1563,7 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession, de
       setExtraMsg(filterFn ? "이 분류에 다시 학습할 단어가 없어요." : "아직 학습한 단어가 없어요.");
       return;
     }
-    setExtraMsg("");
-    setSeconds(0);
-    setSession({ queue: q, pos: 0, doneCount: 0, total: q.length, extraLimit: s.extraLimit || NEW_PER_DAY, started: true, done: false, dismissed: false });
+    mergeOrStart(q);
   };
 
   // 오늘의 학습 시작: 예정된 복습 + 신규 카드로 큐 구성
@@ -1580,10 +1591,7 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession, de
       setExtraMsg("이 분류에 학습할 단어가 없어요.");
       return;
     }
-    const q = picked.map((c) => c.id);
-    setExtraMsg("");
-    setSeconds(0);
-    setSession({ queue: q, pos: 0, doneCount: 0, total: q.length, extraLimit: NEW_PER_DAY, started: true, done: false, dismissed: false });
+    mergeOrStart(picked.map((c) => c.id));
   };
 
   // 약점 단어 학습: 자주 틀린 단어만 모아 집중 복습
@@ -1593,10 +1601,7 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession, de
       setExtraMsg("약점 단어가 없어요. 퀴즈 오답이나 '다시 학습'한 단어가 모여요.");
       return;
     }
-    const q = picked.map((c) => c.id);
-    setExtraMsg("");
-    setSeconds(0);
-    setSession({ queue: q, pos: 0, doneCount: 0, total: q.length, extraLimit: NEW_PER_DAY, started: true, done: false, dismissed: false });
+    mergeOrStart(picked.map((c) => c.id));
   };
 
   const dismissFinish = () => {
@@ -1610,19 +1615,13 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession, de
     const dueCount = plan.review.length;
     const newCount = plan.fresh.length;
     const todayTotal = dueCount + newCount;
-    // 상한에 막혀 이월된(오늘 큐에 안 들어간) 복습 수 — 안내용
-    const dueTotal = cardsRef.current.filter((c) => !c.suspended && c.introducedOn && isDue(c, Date.now())).length;
-    const dueCarry = Math.max(0, dueTotal - dueCount);
     const canContinue = session && session.queue && session.pos < session.queue.length && !session.done;
     return (
       <div className="start-screen">
         <div className="start-card">
           <img className="start-img" src={FINISH_IMAGES_TRANS[finishImg]} alt="" />
           <div className="start-title">오늘의 학습</div>
-          <div className="start-sub">
-            복습 {dueCount}개 · 신규 {newCount}개
-            {dueCarry > 0 && <span className="start-carry"> (복습 {dueCarry}개 이월)</span>}
-          </div>
+          <div className="start-sub">복습 {dueCount}개 · 신규 {newCount}개</div>
           {extraMsg && <div className="finish-msg" style={{ color: "var(--muted)" }}>{extraMsg}</div>}
 
           {canContinue && (() => {
@@ -2034,7 +2033,7 @@ async function bakeQueue(cards, opts, onProgress, isCancelled) {
   // 순서대로 이어붙이기 + 사이 무음
   // GAP_MULT로 세그먼트(단어/뜻/예문/예문뜻) 사이 간격을 조절한다(크게 할수록 길게 쉼).
   const sil = silentBytes();
-  const GAP_MULT = 4;
+  const GAP_MULT = 12; // 세그먼트 사이 쉬는 간격(이전 4의 3배)
   const parts = [];
   for (const s of plan) {
     const b = bytesByKey.get(keyOf(s));
@@ -2103,7 +2102,7 @@ function ListenView({ cards, voiceRef, decks }) {
     return seededShuffle(pool, daySeed).slice(0, BG_COUNT);
   };
   const bgKeyFor = (list) =>
-    "bg|v2|" + list.map((c) => c.id).join(".") + "|r" + (cfg.repeat || 1) +
+    "bg|v3|" + list.map((c) => c.id).join(".") + "|r" + (cfg.repeat || 1) +
     "|ko" + (cfg.koVoice ? 1 : 0) + "|" + bakeGender() + "|" + (ttsSettings.rate || 0.95);
 
   const playBgBlob = (blob, count) => {
@@ -2449,7 +2448,7 @@ function ListenView({ cards, voiceRef, decks }) {
         </button>
         <button className={"listen-mode-btn" + (cfg.mode === "bg" ? " on" : "")}
           onClick={() => cfg.mode !== "bg" && changeMode("bg")}>
-          백그라운드 음성만
+          백그라운드 음성
         </button>
       </div>
 
@@ -2592,6 +2591,9 @@ function ListenView({ cards, voiceRef, decks }) {
               {c.ex && c.ex.ja && (
                 <div className="bg-list-ex">
                   <div className="bg-list-ex-ja">{c.ex.ja}</div>
+                  {c.ex.tokens && c.ex.tokens.length > 0 && (
+                    <div className="bg-list-ex-yomi">{c.ex.tokens.map((t) => (t.r ? t.r : t.t)).join("")}</div>
+                  )}
                   {c.ex.ko && <div className="bg-list-ex-ko">{c.ex.ko}</div>}
                 </div>
               )}
@@ -5071,12 +5073,13 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .bg-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0 4px; }
 .bg-list-item { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--surface); }
 .bg-list-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.bg-list-num { font-size: 11px; font-weight: 700; color: var(--ink-2); min-width: 18px; }
+.bg-list-num { font-size: 17px; font-weight: 700; color: var(--ink-2); min-width: 22px; }
 .bg-list-word { font-size: 17px; font-weight: 700; color: var(--ink); }
 .bg-list-reading { font-size: 12px; color: var(--ink-2); }
 .bg-list-mean { font-size: 14px; color: var(--ink); margin-top: 3px; }
 .bg-list-ex { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); }
 .bg-list-ex-ja { font-size: 13.5px; color: var(--ink); }
+.bg-list-ex-yomi { font-size: 11.5px; color: var(--ink-2); opacity: .7; margin-top: 1px; }
 .bg-list-ex-ko { font-size: 12.5px; color: var(--ink-2); margin-top: 2px; }
 
 .listen-src { display: flex; gap: 7px; flex-wrap: wrap; }
@@ -5098,8 +5101,9 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .listen-toggle-knob { position: absolute; top: 3px; left: 3px; width: 25px; height: 25px;
   border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform .2s; }
 .listen-toggle.on .listen-toggle-knob { transform: translateX(21px); }
-.listen-note { font-size: 12px; color: var(--ink-2); margin-top: 12px; line-height: 1.6;
-  text-align: center; word-break: keep-all; }
+.listen-note { font-size: 11.5px; color: var(--ink-2); opacity: .6; margin-top: 14px; line-height: 1.6;
+  text-align: center; word-break: keep-all; background: var(--surface); border-radius: 10px;
+  padding: 10px 12px; }
 
 /* ===== 한자 상세 모달 ===== */
 .kanji-modal-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,.4);
