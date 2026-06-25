@@ -1967,15 +1967,21 @@ async function fetchTtsBytes(text, gender, rate, lang) {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return bytes;
 }
-// 세그먼트 사이에 끼울 무음 MP3 바이트(짧은 텀). SILENT_MP3(data URL)에서 추출.
-function silentBytes() {
-  try {
-    const b64 = SILENT_MP3.split(",")[1];
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return bytes;
-  } catch { return new Uint8Array(0); }
+// 세그먼트 사이에 끼울 '진짜' 무음을 만든다.
+// 기존 SILENT_MP3는 사실상 메타(Info)프레임이라 여러 번 이어붙여도 실제 무음이 거의 안 생겼다.
+// 그래서 데이터가 0인 정상 MPEG1 Layer3 프레임(128kbps/44.1kHz mono, 417바이트, ≈0.0261초)을
+// 직접 만들어 목표 초만큼 반복한다. 데이터가 0이면 디코더가 무음으로 재생한다.
+const SILENT_FRAME = (() => {
+  const f = new Uint8Array(417);     // 144*128000/44100 = 417
+  f[0] = 0xFF; f[1] = 0xFB; f[2] = 0x90; f[3] = 0xC0; // 헤더, 나머지 413바이트는 0(무음)
+  return f;
+})();
+const SILENT_FRAME_SEC = 1152 / 44100; // ≈0.02612초
+function silenceBytes(seconds) {
+  const n = Math.max(1, Math.round((seconds || 0) / SILENT_FRAME_SEC));
+  const out = new Uint8Array(SILENT_FRAME.length * n);
+  for (let i = 0; i < n; i++) out.set(SILENT_FRAME, i * SILENT_FRAME.length);
+  return out;
 }
 
 // 굽기용 성별 고정값(랜덤이면 목소리가 세그먼트마다 달라지므로 하나로 고정).
@@ -2000,7 +2006,7 @@ function bakeSegmentPlan(cards, repeat, koVoice) {
         if (first && koVoice && ex.ko) plan.push({ text: ex.ko, lang: "ko", kind: "exko", brk: 1 });
       }
     }
-    if (plan.length) plan[plan.length - 1].brk = 3; // 카드 사이는 더 길게 쉼
+    if (plan.length) plan[plan.length - 1].brk = 2; // 카드(단어→다음 단어) 사이는 더 길게(0.6초)
   }
   return plan.filter((s) => s.text && s.text.trim());
 }
@@ -2030,16 +2036,16 @@ async function bakeQueue(cards, opts, onProgress, isCancelled) {
   }
   await Promise.all(Array.from({ length: Math.min(CONC, uniq.length) }, worker));
   if (isCancelled && isCancelled()) return null;
-  // 순서대로 이어붙이기 + 사이 무음
-  // GAP_MULT로 세그먼트(단어/뜻/예문/예문뜻) 사이 간격을 조절한다(크게 할수록 길게 쉼).
-  const sil = silentBytes();
-  const GAP_MULT = 12; // 세그먼트 사이 쉬는 간격(이전 4의 3배)
+  // 순서대로 이어붙이기 + 사이 무음(초 단위로 정확히).
+  // 세그먼트 사이 0.3초, 카드(단어→다음 단어) 사이 0.6초.
+  const GAP_SEG = 0.3, GAP_CARD = 0.6;
+  const silSeg = silenceBytes(GAP_SEG);
+  const silCard = silenceBytes(GAP_CARD);
   const parts = [];
   for (const s of plan) {
     const b = bytesByKey.get(keyOf(s));
     if (b && b.length) parts.push(b);
-    const units = (s.brk || 1) * GAP_MULT;
-    for (let n = 0; n < units; n++) parts.push(sil);
+    parts.push((s.brk || 1) >= 2 ? silCard : silSeg);
   }
   return new Blob(parts, { type: "audio/mpeg" });
 }
@@ -2102,7 +2108,7 @@ function ListenView({ cards, voiceRef, decks }) {
     return seededShuffle(pool, daySeed).slice(0, BG_COUNT);
   };
   const bgKeyFor = (list) =>
-    "bg|v3|" + list.map((c) => c.id).join(".") + "|r" + (cfg.repeat || 1) +
+    "bg|v4|" + list.map((c) => c.id).join(".") + "|r" + (cfg.repeat || 1) +
     "|ko" + (cfg.koVoice ? 1 : 0) + "|" + bakeGender() + "|" + (ttsSettings.rate || 0.95);
 
   const playBgBlob = (blob, count) => {
@@ -2139,7 +2145,7 @@ function ListenView({ cards, voiceRef, decks }) {
       blob = await bakeQueue(
         list,
         { repeat: cfg.repeat || 1, koVoice: cfg.koVoice, rate: ttsSettings.rate || 0.95 },
-        (d, t) => { if (!bgCancelRef.current) setBakeMsg("음성 준비 중… " + d + "/" + t); },
+        (d, t) => { if (!bgCancelRef.current) setBakeMsg("음성 준비 중… " + Math.round(d / t * 100) + "%"); },
         () => bgCancelRef.current
       );
       if (bgCancelRef.current || !blob) return;
@@ -2448,7 +2454,7 @@ function ListenView({ cards, voiceRef, decks }) {
         </button>
         <button className={"listen-mode-btn" + (cfg.mode === "bg" ? " on" : "")}
           onClick={() => cfg.mode !== "bg" && changeMode("bg")}>
-          백그라운드 음성
+          백그라운드에서 공부하기
         </button>
       </div>
 
@@ -2616,7 +2622,7 @@ function ListenView({ cards, voiceRef, decks }) {
       </select>
       {KoVoiceToggle}
       <div className="listen-note">
-        재생을 누르면 음성을 미리 만든 뒤(약 10~30초) 하나로 이어 재생해요. 재생이 시작된 다음에는 <b>화면을 꺼도, 다른 앱으로 가도 계속 들립니다.</b> 잠금화면의 ▶·⏸로도 조작돼요. (만든 음성은 폰에 저장돼 다음엔 즉시 재생)
+        재생을 누르면 음성을 미리 만든 뒤(약 10~30초) 하나로 이어 재생해요. 재생이 시작된 다음에는 <b>화면을 꺼도, 다른 앱으로 가도 계속 들립니다.</b> 잠금화면의 {"▶︎·⏸︎"}로도 조작돼요. (만든 음성은 폰에 저장돼 다음엔 즉시 재생)
       </div>
       </>
       )}
@@ -5062,7 +5068,7 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
   text-decoration: underline; text-underline-offset: 3px; }
 
 /* 듣기 모드 선택(공부 / 백그라운드) */
-.listen-mode { display: flex; gap: 8px; margin-bottom: 14px; background: var(--surface);
+.listen-mode { display: flex; gap: 8px; margin-top: 6px; margin-bottom: 14px; background: var(--surface);
   border: 1px solid var(--line); border-radius: 14px; padding: 5px; }
 .listen-mode-btn { flex: 1; min-height: 42px; border: none; border-radius: 10px; cursor: pointer;
   background: none; color: var(--ink-2); font-size: 13.5px; font-weight: 700; word-break: keep-all;
@@ -5072,8 +5078,8 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 /* 백그라운드 재생 중 30단어 목록 */
 .bg-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0 4px; }
 .bg-list-item { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--surface); }
-.bg-list-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.bg-list-num { font-size: 17px; font-weight: 700; color: var(--ink-2); min-width: 22px; }
+.bg-list-head { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
+.bg-list-num { font-size: 17px; font-weight: 700; color: var(--ink-2); min-width: 14px; }
 .bg-list-word { font-size: 17px; font-weight: 700; color: var(--ink); }
 .bg-list-reading { font-size: 12px; color: var(--ink-2); }
 .bg-list-mean { font-size: 14px; color: var(--ink); margin-top: 3px; }
