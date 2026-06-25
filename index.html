@@ -129,7 +129,12 @@ const fmtClock = (s) => {
 // Leitner 박스별 다음 복습 간격(일). 망각곡선 근사.
 const BOX_INTERVALS = [0, 1, 2, 4, 8, 16, 32];
 const MAX_BOX = BOX_INTERVALS.length - 1;
-const NEW_PER_DAY = 20;
+// 오늘의 학습 하루 총량(복습+신규 합). 복습이 아무리 쌓여도 이 수를 넘지 않는다.
+const DAILY_TOTAL = 30;
+// 하루 신규 상한(복습이 적은 날엔 신규로 총량을 채울 수 있게 총량과 동일하게 둠).
+const NEW_PER_DAY = 30;
+// 신규 최소 비율: 복습이 쌓여도 신규가 최소 이 비율만큼은 자리 확보(20%).
+const NEW_RATIO_MIN = 0.2;
 
 function hasKanji(s) {
   for (const ch of s) if (ch >= "\u4e00" && ch <= "\u9fff") return true;
@@ -804,20 +809,39 @@ function seededShuffle(arr, seed) {
   return a;
 }
 
-/* 오늘 학습 대상 카드 목록을 구성. (복습 due 카드 + 신규 카드)
-   limit: 신규 카드 최대 수 (기본 NEW_PER_DAY, 추가학습 시 늘림) */
-function buildQueue(cards, limit) {
+/* 오늘 학습 대상 계획. (복습 due 카드 + 신규 카드)
+   - 하루 총량은 DAILY_TOTAL(=30)을 넘지 않는다.
+   - 복습이 아무리 쌓여도 신규는 최소 NEW_RATIO_MIN(20%) 자리를 보장한다.
+   - 복습이 적은 날엔 남는 자리를 신규로 채운다(신규 상한 NEW_PER_DAY 내).
+   - 총량을 넘는 복습은 '더 학습하기(다시 학습)'나 다음 날로 이월된다(오래된 due 우선).
+   total: 총량 override(미지정 시 DAILY_TOTAL).
+   반환: { review:[...], fresh:[...] } */
+function planToday(cards, total) {
   const now = Date.now();
   const today = todayStr();
   const seed = today.split("-").join("") | 0;
-  const newLimit = typeof limit === "number" ? limit : NEW_PER_DAY;
-  const due = cards.filter((c) => !c.suspended && c.introducedOn && isDue(c, now));
+  const TOTAL = typeof total === "number" ? total : DAILY_TOTAL;
+
   const introducedToday = cards.filter((c) => c.introducedOn === today).length;
-  const room = Math.max(0, newLimit - introducedToday);
-  const freshPool = cards.filter((c) => !c.suspended && !c.introducedOn);
-  const fresh = seededShuffle(freshPool, seed).slice(0, room);
-  const dueShuffled = seededShuffle(due, seed ^ 0x9e3779b9);
-  return [...dueShuffled, ...fresh];
+  const newRoom = Math.max(0, NEW_PER_DAY - introducedToday); // 오늘 남은 신규 여유
+  // 복습: 오래된 due 먼저(이월 누적 방지)
+  const due = cards
+    .filter((c) => !c.suspended && c.introducedOn && isDue(c, now))
+    .sort((a, b) => String(a.due || "").localeCompare(String(b.due || "")));
+  const freshPool = seededShuffle(cards.filter((c) => !c.suspended && !c.introducedOn), seed);
+
+  const freshAvail = Math.min(freshPool.length, newRoom);
+  const newFloor = Math.round(TOTAL * NEW_RATIO_MIN); // 신규 최소 보장 자리(20%)
+  // 신규 최소자리를 비워두고 복습을 먼저 채운 뒤, 남는 자리를 신규로 채운다.
+  let reviewCount = Math.min(due.length, TOTAL - Math.min(newFloor, freshAvail));
+  let newCount = Math.min(freshAvail, TOTAL - reviewCount);
+  return { review: due.slice(0, reviewCount), fresh: freshPool.slice(0, newCount) };
+}
+
+/* 오늘 학습 큐(복습 먼저, 그다음 신규). limit 주면 총량 override. */
+function buildQueue(cards, limit) {
+  const { review, fresh } = planToday(cards, limit);
+  return [...review, ...fresh];
 }
 
 /* 복습 큐: 이미 학습한(또는 due 지난) 카드를 다시 모아 학습. due 무시하고 학습한 카드 전체에서 추출.
@@ -1581,16 +1605,24 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession, de
 
   // 시작 화면: 세션을 아직 시작하지 않았을 때(다짜고짜 카드 대신 선택지를 보여줌)
   if (!session || !session.started) {
-    const dueCount = cardsRef.current.filter((c) => !c.suspended && c.introducedOn && isDue(c, Date.now())).length;
-    const newCount = Math.min(freshLeft, Math.max(0, NEW_PER_DAY - introducedToday));
+    // 표시 카운트는 실제 큐와 동일하게 planToday에서 뽑는다(총량·신규비율 상한 반영).
+    const plan = planToday(cardsRef.current);
+    const dueCount = plan.review.length;
+    const newCount = plan.fresh.length;
     const todayTotal = dueCount + newCount;
+    // 상한에 막혀 이월된(오늘 큐에 안 들어간) 복습 수 — 안내용
+    const dueTotal = cardsRef.current.filter((c) => !c.suspended && c.introducedOn && isDue(c, Date.now())).length;
+    const dueCarry = Math.max(0, dueTotal - dueCount);
     const canContinue = session && session.queue && session.pos < session.queue.length && !session.done;
     return (
       <div className="start-screen">
         <div className="start-card">
           <img className="start-img" src={FINISH_IMAGES_TRANS[finishImg]} alt="" />
           <div className="start-title">오늘의 학습</div>
-          <div className="start-sub">복습 {dueCount}개 · 신규 {newCount}개</div>
+          <div className="start-sub">
+            복습 {dueCount}개 · 신규 {newCount}개
+            {dueCarry > 0 && <span className="start-carry"> (복습 {dueCarry}개 이월)</span>}
+          </div>
           {extraMsg && <div className="finish-msg" style={{ color: "var(--muted)" }}>{extraMsg}</div>}
 
           {canContinue && (() => {
@@ -4714,6 +4746,7 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
   display: block; margin: 0 auto 18px; }
 .start-title { color: var(--ink); font-size: 20px; font-weight: 800; letter-spacing: -0.3px; margin-bottom: 3px; }
 .start-sub { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+.start-carry { color: var(--ink-2); font-size: 12px; opacity: .85; }
 .start-btn-primary { width: 100%; height: 48px; border-radius: 13px; border: none;
   background: var(--accent); color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; margin-bottom: 9px;
   line-height: 1.5; word-break: keep-all; }
