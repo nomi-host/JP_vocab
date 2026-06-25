@@ -415,7 +415,16 @@ function withWordStop(s) {
   if (/[。、.!?！？〜~…]$/.test(t)) return t;
   return t + "。";
 }
+/* 엔진이 특정 단어만 오독/끊어 읽을 때 발음용 텍스트를 교정한다(화면 표기는 그대로, 소리만 교체).
+   원인이 '단어별 사전 인식 실패'라 일괄 규칙이 아닌 케이스별 등록이 정확하다.
+   키: 표제어(word) 또는 읽기(reading) / 값: 엔진에 보낼 텍스트(구두점·가타카나 등 직접 제어).
+   예) うっとり → 엔진이 'うっ(감탄사)+とり'로 끊어 읽어, 한 단어로 인식되기 쉬운 가타카나로. */
+const WORD_SPEECH_OVERRIDE = {
+  "うっとり": "ウットリ",
+};
 function wordSpeech(card) {
+  const ov = WORD_SPEECH_OVERRIDE[card.word] || (card.reading && WORD_SPEECH_OVERRIDE[card.reading]);
+  if (ov) return withWordStop(tildeToYomi(ov));
   const clean = card.word.split(/[／/・↔≠\s(]/)[0];
   if (card.hasKanji) {
     // 문장형 표현은 원문으로(조사 は 등 문맥 의존 발음 보존)
@@ -429,19 +438,21 @@ function wordSpeech(card) {
   return withWordStop(tildeToYomi(clean));
 }
 
-/* 예문 발음용 텍스트: 토큰별로 판단해 만든다.
-   - 상용외(NON_JOYO) 한자가 든 토큰: 읽기(후리가나)로 보냄 (엔진이 못/다르게 읽으므로)
-   - 그 외 토큰: 원문(t) 그대로 (구글 TTS가 사전·문맥으로 정확히 읽음. 送り仮名·조사 자연 처리)
-   이렇게 하면 見通し처럼 잘리는 문제도, 규격외 한자가 후리가나와 다르게 읽히는 문제도 막는다.
-   (단어 발음 wordSpeech와 동일한 원리를 토큰 단위로 적용.) */
+/* 예문 발음용 텍스트 — 토큰별 하이브리드.
+   - 읽기 없는 토큰(조사·꼬리가나): 원문 그대로 (이미 가나. 조사 は는 엔진이 文脈으로 わ로 읽음)
+   - 읽기가 は/へ/を 로 시작하는 토큰: 한자 원문으로 보낸다.
+       (후리가나로 보내면 그 첫 글자 は/へ/을 엔진이 '조사(わ/え/오)'로 오독함.
+        예) 静かに+はなしはじめた → "しずかに‧わ‧なしはじめた". 한자 '話し始めた'는 おくりがな로 はなし 정확)
+   - 그 외 토큰: 후리가나(t.r)로 보낸다. (多音 한자 정확: 埋→うず, 金→かね)
+   주의: 토큰이 비면 ex.ja(한자원문)로 폴백. */
 function exampleSpeech(ex) {
   if (!ex) return "";
   if (ex.tokens && ex.tokens.length) {
-    // 한자 토큰은 저장된 읽기(후리가나 t.r)로, 읽기가 없는 토큰(조사·꼬리가나)은 원문으로.
-    // 이렇게 하면 들리는 발음이 화면에 보이는 후리가나와 정확히 일치한다.
-    //  - 埋める(うず) / 金(かね)처럼 多音 한자를 엔진이 빈도 높은 다른 음(うめる/きん)으로
-    //    읽어버리는 문제를 막는다. (조사 は 등은 그대로 두면 엔진이 문맥으로 처리)
-    const out = ex.tokens.map((t) => (t.r ? t.r : t.t)).join("");
+    const out = ex.tokens.map((t) => {
+      if (!t.r) return t.t;                 // 조사·꼬리가나
+      if (/^[はへを]/.test(t.r)) return t.t; // は/へ/を 시작 → 한자로(조사 오독 방지)
+      return t.r;                           // 그 외 → 후리가나(多音 정확)
+    }).join("");
     return tildeToYomi(out);
   }
   if (ex.ja) return tildeToYomi(ex.ja);
@@ -2038,7 +2049,7 @@ async function bakeQueue(cards, opts, onProgress, isCancelled) {
   if (isCancelled && isCancelled()) return null;
   // 순서대로 이어붙이기 + 사이 무음(초 단위로 정확히).
   // 세그먼트 사이 0.3초, 카드(단어→다음 단어) 사이 0.6초.
-  const GAP_SEG = 0.3, GAP_CARD = 0.6;
+  const GAP_SEG = 0.6, GAP_CARD = 1.0;
   const silSeg = silenceBytes(GAP_SEG);
   const silCard = silenceBytes(GAP_CARD);
   const parts = [];
@@ -2108,7 +2119,7 @@ function ListenView({ cards, voiceRef, decks }) {
     return seededShuffle(pool, daySeed).slice(0, BG_COUNT);
   };
   const bgKeyFor = (list) =>
-    "bg|v4|" + list.map((c) => c.id).join(".") + "|r" + (cfg.repeat || 1) +
+    "bg|v7|" + list.map((c) => c.id).join(".") + "|r" + (cfg.repeat || 1) +
     "|ko" + (cfg.koVoice ? 1 : 0) + "|" + bakeGender() + "|" + (ttsSettings.rate || 0.95);
 
   const playBgBlob = (blob, count) => {
@@ -2594,12 +2605,13 @@ function ListenView({ cards, voiceRef, decks }) {
                 {c.hasKanji && c.reading && <span className="bg-list-reading">{c.reading}</span>}
               </div>
               <div className="bg-list-mean">{c.meaning}</div>
-              {c.ex && c.ex.ja && (
+              {c.ex && (c.ex.ja || (c.ex.tokens && c.ex.tokens.length > 0)) && (
                 <div className="bg-list-ex">
-                  <div className="bg-list-ex-ja">{c.ex.ja}</div>
-                  {c.ex.tokens && c.ex.tokens.length > 0 && (
-                    <div className="bg-list-ex-yomi">{c.ex.tokens.map((t) => (t.r ? t.r : t.t)).join("")}</div>
-                  )}
+                  <div className="bg-list-ex-ja">
+                    {c.ex.tokens && c.ex.tokens.length > 0
+                      ? <FuriganaText tokens={c.ex.tokens} showFuri={true} />
+                      : c.ex.ja}
+                  </div>
                   {c.ex.ko && <div className="bg-list-ex-ko">{c.ex.ko}</div>}
                 </div>
               )}
@@ -4442,6 +4454,8 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
   --muted: #8e8e93;
   --line: #e5e5ea;
   --fill: #e9e9eb;
+  /* 흰 박스(콘텐츠 카드) 공통 그림자 — 모든 탭에서 동일하게 사용 */
+  --card-shadow: 0 1px 2px rgba(0,0,0,.04);
   /* 포인트 컬러 (아이콘 파랑 #008CD7) 3단계 */
   --accent: #008CD7;          /* 100% */
   --accent-deep: #0067A0;     /* 진한 파랑 텍스트용 */
@@ -4490,7 +4504,7 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
   padding: 6px 12px; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 .card { background: var(--surface); border-radius: 22px; padding: 12px 16px 16px;
-  box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 10px 30px rgba(0,0,0,.06);
+  box-shadow: var(--card-shadow);
   display: flex; flex-direction: column; min-height: 52vh; }
 
 /* 상단 바 */
@@ -4565,7 +4579,7 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .grade { flex: 1; border: none; border-radius: 16px; padding: 12px 0;
   font-size: 16px; font-weight: 700; cursor: pointer;
   display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-  box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  box-shadow: var(--card-shadow); }
 .grade-label { display: inline-flex; align-items: center; gap: 6px; }
 .grade-sub { font-size: 11px; font-weight: 600; opacity: .75; }
 .grade-again { background: var(--accent-30); color: var(--accent-deep); }
@@ -4596,7 +4610,7 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .quiz-review { margin: 4px 0 20px; }
 .quiz-review-title { font-size: 15px; font-weight: 700; color: var(--ink); margin-bottom: 10px; }
 .quiz-review-item { background: var(--surface); border-radius: 14px; padding: 14px 16px;
-  margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  margin-bottom: 10px; box-shadow: var(--card-shadow); }
 .quiz-review-q { font-size: 16px; font-weight: 600; color: var(--ink); margin-bottom: 10px;
   font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; }
 .quiz-review-line { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
@@ -4608,7 +4622,7 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .quiz-review-right-text { font-size: 14px; color: var(--ink); font-weight: 600; }
 .quiz-prompt { background: var(--surface); border-radius: 18px; padding: 32px 20px;
   text-align: center; margin-bottom: 18px;
-  box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.05); }
+  box-shadow: var(--card-shadow); }
 .quiz-prompt-main { font-size: 28px; font-weight: 700; color: var(--ink); line-height: 1.3;
   font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; }
 .quiz-prompt-sub { font-size: 15px; color: var(--muted); margin-top: 8px; letter-spacing: 1px; }
@@ -4630,9 +4644,9 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 
 /* 백업 */
 .backup-box { background: var(--surface); border-radius: 18px; padding: 18px;
-  margin-top: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  margin-top: 14px; box-shadow: var(--card-shadow); }
 .voice-box { background: var(--surface); border-radius: 18px; padding: 18px;
-  margin-top: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  margin-top: 14px; box-shadow: var(--card-shadow); }
 .voice-title { font-size: 16px; font-weight: 700; color: var(--ink); margin-bottom: 14px; }
 .voice-titlerow { display: flex; align-items: flex-start; justify-content: space-between;
   margin-bottom: 14px; }
@@ -4882,7 +4896,7 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .count { font-size: 13px; color: var(--muted); font-weight: 600; }
 .list-search { margin: 6px 0 10px; }
 .rows { display: flex; flex-direction: column; gap: 8px; }
-.row { background: var(--surface); border-radius: 14px;
+.row { background: var(--surface); border-radius: 14px; box-shadow: var(--card-shadow);
   display: flex; align-items: stretch; gap: 0; width: 100%; overflow: hidden; }
 .row:active { background: var(--fill); }
 .row-main { flex: 1; display: flex; align-items: center; gap: 10px;
@@ -4965,21 +4979,21 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .stats { max-width: 480px; margin: 0 auto; }
 .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 12px; }
 .stat-card { background: var(--surface); border-radius: 16px; padding: 10px 14px;
-  box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  box-shadow: var(--card-shadow); }
 .stat-card-value { font-size: 24px; font-weight: 700; color: var(--ink);
   font-variant-numeric: tabular-nums; line-height: 1.1; }
 .stat-card-value span { font-size: 14px; font-weight: 600; color: var(--ink-2); margin-left: 2px; }
 .stat-card-label { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .stat-progress-box { background: var(--surface); border-radius: 16px; padding: 16px;
-  box-shadow: 0 1px 2px rgba(0,0,0,.04); margin-bottom: 14px; }
+  box-shadow: var(--card-shadow); margin-bottom: 14px; }
 .stat-progress-head { display: flex; justify-content: space-between; align-items: center;
   font-size: 14px; font-weight: 600; color: var(--ink); margin-bottom: 10px; }
 .stat-progress-track { height: 10px; background: var(--fill); border-radius: 980px; overflow: hidden; }
 .stat-progress-fill { height: 100%; background: var(--accent); border-radius: 980px; transition: width .3s; }
 .chart-box { background: var(--surface); border-radius: 16px; padding: 16px;
-  box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  box-shadow: var(--card-shadow); }
 .cal-box { background: var(--surface); border-radius: 16px; padding: 16px;
-  box-shadow: 0 1px 2px rgba(0,0,0,.04); margin-top: 14px; }
+  box-shadow: var(--card-shadow); margin-top: 14px; }
 .cal-title { font-size: 15px; font-weight: 700; color: var(--ink); margin-bottom: 12px; }
 .cal-total { font-size: 13px; font-weight: 600; color: var(--accent); margin-left: 4px; }
 .cal-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -5024,10 +5038,10 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 
 /* 연속 듣기 뷰 */
 .listen { display: flex; flex-direction: column; }
-.listen-now { background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
+.listen-now { background: var(--surface); border-radius: 18px;
   padding: 28px 22px; text-align: center; min-height: 200px;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.03); margin-top: 8px; margin-bottom: 16px; }
+  box-shadow: var(--card-shadow); margin-top: 8px; margin-bottom: 16px; }
 .listen-now.is-idle { min-height: 100px; padding: 18px 22px; }
 .listen-phase { font-size: 12px; font-weight: 700; color: var(--accent);
   background: var(--accent-soft); border-radius: 999px; padding: 4px 14px; margin-bottom: 14px;
@@ -5068,8 +5082,8 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
   text-decoration: underline; text-underline-offset: 3px; }
 
 /* 듣기 모드 선택(공부 / 백그라운드) */
-.listen-mode { display: flex; gap: 8px; margin-top: 6px; margin-bottom: 14px; background: var(--surface);
-  border: 1px solid var(--line); border-radius: 14px; padding: 5px; }
+.listen-mode { display: flex; gap: 8px; margin-top: 6px; margin-bottom: 7px; background: var(--surface);
+  box-shadow: var(--card-shadow); border-radius: 14px; padding: 5px; }
 .listen-mode-btn { flex: 1; min-height: 42px; border: none; border-radius: 10px; cursor: pointer;
   background: none; color: var(--ink-2); font-size: 13.5px; font-weight: 700; word-break: keep-all;
   padding: 6px 8px; line-height: 1.3; }
@@ -5077,7 +5091,7 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 
 /* 백그라운드 재생 중 30단어 목록 */
 .bg-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0 4px; }
-.bg-list-item { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--surface); }
+.bg-list-item { border-radius: 12px; padding: 10px 12px; background: var(--surface); box-shadow: var(--card-shadow); }
 .bg-list-head { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
 .bg-list-num { font-size: 17px; font-weight: 700; color: var(--ink-2); min-width: 14px; }
 .bg-list-word { font-size: 17px; font-weight: 700; color: var(--ink); }
@@ -5107,7 +5121,7 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .listen-toggle-knob { position: absolute; top: 3px; left: 3px; width: 25px; height: 25px;
   border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform .2s; }
 .listen-toggle.on .listen-toggle-knob { transform: translateX(21px); }
-.listen-note { font-size: 11.5px; color: var(--ink-2); opacity: .6; margin-top: 14px; line-height: 1.6;
+.listen-note { font-size: 11.5px; color: var(--ink-2); opacity: .6; margin-top: 9px; line-height: 1.6;
   text-align: center; word-break: keep-all; background: var(--surface); border-radius: 10px;
   padding: 10px 12px; }
 
