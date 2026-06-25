@@ -34,6 +34,7 @@
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef, useMemo, useCallback, Fragment } = React;
 const HEADER_ICON = "data:image/png;base64,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";
+// img 폴더에 있는 고양이 그림 전부. 모든 화면(시작/완료/빈 화면)에서 동일하게 사용.
 const FINISH_IMAGES = [
   "img/cat1.png",
   "img/cat2.png",
@@ -43,19 +44,13 @@ const FINISH_IMAGES = [
   "img/cat6.png",
   "img/cat7.png",
   "img/cat8.png",
-  "img/cat9.png"
+  "img/cat9.png",
+  "img/cat10.png",
+  "img/cat11.png",
+  "img/cat12.png",
+  "img/cat13.png"
 ];
-const FINISH_IMAGES_TRANS = [
-  "img/cat1.png",
-  "img/cat2.png",
-  "img/cat3.png",
-  "img/cat4.png",
-  "img/cat5.png",
-  "img/cat6.png",
-  "img/cat7.png",
-  "img/cat8.png",
-  "img/cat9.png"
-];
+const FINISH_IMAGES_TRANS = FINISH_IMAGES;
 
 /* ============================================================================
    日本語単語帳  —  Japanese Vocabulary Trainer
@@ -259,6 +254,42 @@ function unlockAudio() {
   } catch {}
 }
 
+/* ===== 백그라운드 재생(베스트에포트) =====
+   iOS Safari는 화면이 꺼지거나 앱이 백그라운드로 가면 오디오 세션을 끊는다.
+   무음 트랙을 끊김 없이 계속 재생해 두면 오디오 세션이 살아있어, 그 위로
+   단어/예문 TTS 클립을 이어 재생할 수 있다(기기·iOS 버전에 따라 100%는 아님).
+   반드시 사용자 탭(제스처) 안에서 startKeepAlive()를 호출해야 한다. */
+let keepAliveAudio = null;
+function startKeepAlive() {
+  try {
+    if (!keepAliveAudio) {
+      keepAliveAudio = new Audio(SILENT_MP3);
+      keepAliveAudio.loop = true;
+      keepAliveAudio.muted = false;
+      keepAliveAudio.volume = 1; // 내용이 무음이라 들리진 않음(세션 유지용)
+    }
+    const p = keepAliveAudio.play();
+    if (p && p.catch) p.catch(() => {});
+  } catch {}
+}
+function stopKeepAlive() {
+  try { if (keepAliveAudio) keepAliveAudio.pause(); } catch {}
+}
+
+/* 잠금화면/제어센터에 표시할 메타데이터와 컨트롤(재생·정지·이전·다음)을 등록한다. */
+function setMediaMeta(title, artist) {
+  if (!("mediaSession" in navigator) || typeof MediaMetadata === "undefined") return;
+  try {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: title || "", artist: artist || "", album: "일본어 단어장",
+    });
+  } catch {}
+}
+function setMediaPlaybackState(state) {
+  if (!("mediaSession" in navigator)) return;
+  try { navigator.mediaSession.playbackState = state; } catch {}
+}
+
 /* 통합 speak: 설정에 따라 Google 우선, 실패하면 내장 음성으로 폴백.
    kind: "word"(단어, 항상 1.0x) | "example"(예문, 설정 속도) */
 function speakSmart(text, voiceRef, onState, kind) {
@@ -390,18 +421,28 @@ function isPhrasalExpr(s) {
   }
   return false;
 }
+/* 단어 발음 텍스트 끝에 마침표를 붙인다.
+   고립된 히라가나 단어(예: うるおい)를 Chirp3-HD가 문장 중간으로 오인해
+   'うる/おい'처럼 운율이 끊기는 것을 막고, 끝음이 잘리는 것도 완화한다.
+   이미 구두점/물결로 끝나면 그대로 둔다. */
+function withWordStop(s) {
+  const t = (s || "").trim();
+  if (!t) return t;
+  if (/[。、.!?！？〜~…]$/.test(t)) return t;
+  return t + "。";
+}
 function wordSpeech(card) {
   const clean = card.word.split(/[／/・↔≠\s(]/)[0];
   if (card.hasKanji) {
     // 문장형 표현은 원문으로(조사 は 등 문맥 의존 발음 보존)
-    if (isPhrasalExpr(card.word)) return tildeToYomi(clean);
+    if (isPhrasalExpr(card.word)) return withWordStop(tildeToYomi(clean));
     // 순수 단어는 읽기(후리가나) 통짜로 — 多音 한자/송리가나 정확
     if (card.reading) {
-      return tildeToYomi(card.reading.split(/[／/・↔≠\s(]/)[0]);
+      return withWordStop(tildeToYomi(card.reading.split(/[／/・↔≠\s(]/)[0]));
     }
-    return tildeToYomi(clean);
+    return withWordStop(tildeToYomi(clean));
   }
-  return tildeToYomi(clean);
+  return withWordStop(tildeToYomi(clean));
 }
 
 /* 예문 발음용 텍스트: 토큰별로 판단해 만든다.
@@ -412,11 +453,11 @@ function wordSpeech(card) {
 function exampleSpeech(ex) {
   if (!ex) return "";
   if (ex.tokens && ex.tokens.length) {
-    const out = ex.tokens.map((t) => {
-      // 상용외 한자가 든 토큰만 읽기로 대체(읽기가 있을 때). 나머지는 원문 그대로.
-      if (t.r && hasNonJoyo(t.t)) return t.r;
-      return t.t;
-    }).join("");
+    // 한자 토큰은 저장된 읽기(후리가나 t.r)로, 읽기가 없는 토큰(조사·꼬리가나)은 원문으로.
+    // 이렇게 하면 들리는 발음이 화면에 보이는 후리가나와 정확히 일치한다.
+    //  - 埋める(うず) / 金(かね)처럼 多音 한자를 엔진이 빈도 높은 다른 음(うめる/きん)으로
+    //    읽어버리는 문제를 막는다. (조사 は 등은 그대로 두면 엔진이 문맥으로 처리)
+    const out = ex.tokens.map((t) => (t.r ? t.r : t.t)).join("");
     return tildeToYomi(out);
   }
   if (ex.ja) return tildeToYomi(ex.ja);
@@ -457,6 +498,9 @@ function meaningSpeech(meaning) {
     t = t.replace(/[~～]/g, "뭐뭐").replace(/[↔≠/／]/g, " ").replace(/\s+/g, " ").trim();
     s = t;
   }
+  // 끝에 마침표를 붙여 (1) 마지막 음절이 잘리는 끝음 문제를 막고
+  // (2) 콤마(,)가 한 번 또렷이 쉬도록 문장 경계를 만든다. 예) "돌아보다, 돌보다."
+  if (s && !/[.。!?！？]$/.test(s)) s = s + ".";
   return s;
 }
 
@@ -483,14 +527,15 @@ if (typeof window !== "undefined" && window.speechSynthesis) {
 }
 
 // 일본어 텍스트를 끝까지 재생 (google→내장 폴백). resolve로 끝남 알림.
-function playJaAsync(text, voiceRef, ctl) {
+function playJaAsync(text, voiceRef, ctl, kind) {
   return new Promise((resolve) => {
     if (!text || (ctl && ctl.cancelled)) return resolve();
     let done = false;
     const finish = () => { if (!done) { done = true; resolve(); } };
+    // kind 기본 "example"(설정 속도). 단어는 "word"로 넘겨 항상 1.0x로 또렷하게.
     speakSmart(text, voiceRef, (st) => {
       if (st === "idle" || st === "unsupported") finish();
-    }, "example");
+    }, kind || "example");
     // 안전장치: 너무 길어지면 강제 종료 (max 12초)
     setTimeout(finish, 12000);
   });
@@ -1835,6 +1880,28 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession, de
 /* ===================== 연속 듣기 뷰 ===================== */
 const LISTEN_KEY = "jp-vocab-listen-v1";
 const defaultListenSettings = { koVoice: true, repeat: 2, src: "today", cat: "", limit: 30, keepAwake: true };
+
+// 재생 세션(어떤 단어들을 어디까지 듣고 있었는지)을 저장해 둔다.
+// 다른 탭/앱에 갔다 오거나 새로고침으로 페이지가 다시 떠도, 같은 세션을 이어 들을 수 있게.
+const LISTEN_SESSION_KEY = "jp-vocab-listen-session-v1";
+function loadListenSession() {
+  try {
+    const raw = localStorage.getItem(LISTEN_SESSION_KEY);
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    if (s && Array.isArray(s.ids) && s.ids.length) return s;
+    return null;
+  } catch { return null; }
+}
+function saveListenSession(ids, idx) {
+  try {
+    if (!ids || !ids.length) { localStorage.removeItem(LISTEN_SESSION_KEY); return; }
+    localStorage.setItem(LISTEN_SESSION_KEY, JSON.stringify({ ids, idx }));
+  } catch {}
+}
+function clearListenSession() {
+  try { localStorage.removeItem(LISTEN_SESSION_KEY); } catch {}
+}
 function loadListenSettings() {
   try {
     const raw = localStorage.getItem(LISTEN_KEY);
@@ -1854,6 +1921,17 @@ function ListenView({ cards, voiceRef, decks }) {
   const [queue, setQueue] = useState([]);   // 재생할 카드 배열
   const ctlRef = useRef(null);              // 재생 컨트롤러(취소용)
   const wakeLockRef = useRef(null);         // 화면 꺼짐 방지(Wake Lock)
+  const cardsRef = useRef(cards);           // 최신 cards 참조(목록 수정 실시간 반영용)
+  cardsRef.current = cards;
+
+  // 큐의 i번째 카드를 항상 '최신' 버전으로 가져온다.
+  // 목록 탭에서 단어/예문/뜻을 수정하면 cards가 새 객체로 갱신되는데,
+  // 재생 큐는 시작 시점의 스냅샷이라 그대로면 옛 내용이 들린다. id로 다시 찾아 최신을 쓴다.
+  const freshCard = (snap) => {
+    if (!snap) return snap;
+    const cur = cardsRef.current && cardsRef.current.find((c) => c.id === snap.id);
+    return cur || snap;
+  };
 
   const update = (patch) => {
     setCfg((prev) => { const next = { ...prev, ...patch }; saveListenSettings(next); return next; });
@@ -1884,13 +1962,16 @@ function ListenView({ cards, voiceRef, decks }) {
     for (let i = startAt; i < list.length; i++) {
       if (ctl.cancelled) return;
       setIdx(i);
-      const card = list[i];
+      saveListenSession(list.map((c) => c.id), i); // 위치 저장(이어듣기용)
+      const card = freshCard(list[i]); // 목록에서 수정한 내용 실시간 반영
+      setMediaMeta(card.word, card.meaning); // 잠금화면 표시 갱신
+      setMediaPlaybackState("playing");
       const reps = Math.max(1, cfg.repeat || 1);
       for (let r = 0; r < reps; r++) {
         if (ctl.cancelled) return;
         const firstRep = r === 0; // 한국어 뜻은 첫 회차에만 안내
         setPhase("일본어");
-        await playJaAsync(wordSpeech(card), voiceRef, ctl);
+        await playJaAsync(wordSpeech(card), voiceRef, ctl, "word");
         if (ctl.cancelled) return;
         await sleep(350, ctl);
 
@@ -1919,11 +2000,13 @@ function ListenView({ cards, voiceRef, decks }) {
       await sleep(500, ctl); // 카드 사이 텀
     }
     // 끝까지 재생 완료
-    if (!ctl.cancelled) { setPlaying(false); setPhase("완료"); }
+    if (!ctl.cancelled) { setPlaying(false); setPhase("완료"); clearListenSession(); stopKeepAlive(); setMediaPlaybackState("none"); }
   };
 
   const start = () => {
     unlockAudio(); // iOS: 사용자 탭 안에서 오디오 재생 권한 확보
+    startKeepAlive(); // 화면 꺼져도 이어 재생되도록 무음 세션 유지(베스트에포트)
+    if (ctlRef.current) ctlRef.current.cancelled = true; // 백그라운드에 얼어있던 이전 루프 중복 방지
     // 멈춰 둔 큐가 남아 있고 아직 끝나지 않았으면 그 자리에서 이어서 재생
     if (queue.length > 0 && idx < queue.length && phase !== "완료") {
       setPlaying(true);
@@ -1941,6 +2024,7 @@ function ListenView({ cards, voiceRef, decks }) {
   // 처음부터 새로 (범위 바꿨거나 다시 시작하고 싶을 때)
   const restart = () => {
     unlockAudio(); // iOS: 사용자 탭 안에서 오디오 재생 권한 확보
+    startKeepAlive();
     if (ctlRef.current) ctlRef.current.cancelled = true;
     stopAudio(true);
     try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
@@ -1957,12 +2041,15 @@ function ListenView({ cards, voiceRef, decks }) {
     if (ctlRef.current) ctlRef.current.cancelled = true;
     stopAudio(true);
     try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
+    stopKeepAlive();
+    setMediaPlaybackState("paused");
     setPlaying(false);
   };
 
   // 범위/카테고리를 바꾸면 멈추고 큐를 비워, 다음 재생 때 새 범위로 처음부터 시작
   const changeScope = (patch) => {
     stop();
+    clearListenSession(); // 범위가 바뀌면 이전 이어듣기 세션은 버린다
     setQueue([]);
     setIdx(0);
     setPhase("");
@@ -1970,7 +2057,7 @@ function ListenView({ cards, voiceRef, decks }) {
   };
 
   const next = () => {
-    if (!playing || queue.length === 0) return;
+    if (queue.length === 0) return;
     if (ctlRef.current) ctlRef.current.cancelled = true;
     stopAudio(true);
     try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
@@ -1978,29 +2065,70 @@ function ListenView({ cards, voiceRef, decks }) {
     setTimeout(() => { setPlaying(true); runLoop(queue, ni); }, 80);
   };
 
+  // 이전 단어부터 다시 재생
+  const prev = () => {
+    if (queue.length === 0) return;
+    if (ctlRef.current) ctlRef.current.cancelled = true;
+    stopAudio(true);
+    try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
+    const pi = Math.max(idx - 1, 0);
+    setTimeout(() => { setPlaying(true); runLoop(queue, pi); }, 80);
+  };
+
+  // 잠금화면/제어센터 컨트롤이 호출할 최신 동작들을 ref에 담아둔다.
+  // (start/stop/prev/next는 매 렌더 새로 생기므로 ref로 항상 최신을 가리키게 함)
+  const actionsRef = useRef({});
+  actionsRef.current = { play: start, pause: stop, prev, next };
+
+  // 잠금화면 재생/정지/이전/다음 컨트롤 등록 (마운트 시 1회).
+  // MediaSession 핸들러는 iOS에서 사용자 제스처로 취급돼 백그라운드에서도 재생을 깨운다.
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    const ms = navigator.mediaSession;
+    const bind = (a, fn) => { try { ms.setActionHandler(a, fn); } catch {} };
+    bind("play", () => actionsRef.current.play && actionsRef.current.play());
+    bind("pause", () => actionsRef.current.pause && actionsRef.current.pause());
+    bind("previoustrack", () => actionsRef.current.prev && actionsRef.current.prev());
+    bind("nexttrack", () => actionsRef.current.next && actionsRef.current.next());
+    return () => { ["play", "pause", "previoustrack", "nexttrack"].forEach((a) => bind(a, null)); };
+  }, []);
+
   // 탭을 떠나거나 언마운트되면 재생 정지
   useEffect(() => {
     return () => {
       if (ctlRef.current) ctlRef.current.cancelled = true;
       stopAudio(true);
       try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
+      stopKeepAlive();
+      setMediaPlaybackState("none");
     };
   }, []);
 
-  // 화면이 꺼지거나 앱이 백그라운드로 가면 iOS가 소리를 멈춘다.
-  // 재생 루프도 멈추고 정지 상태로 바꿔, 돌아왔을 때 '이어 재생'으로 재개하게 한다.
+  // 마운트 시: 저장된 세션이 있으면 그 큐/위치를 복원한다.
+  // (다른 앱/탭에 갔다 오거나 새로고침으로 페이지가 다시 떠도 '이어 재생'으로 같은 세션 계속)
   useEffect(() => {
-    const onHide = () => {
-      if (document.hidden) {
-        if (ctlRef.current) ctlRef.current.cancelled = true;
-        stopAudio(true);
-        try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
-        setPlaying(false);
-      }
-    };
-    document.addEventListener("visibilitychange", onHide);
-    return () => document.removeEventListener("visibilitychange", onHide);
+    const sess = loadListenSession();
+    if (!sess) return;
+    const byId = new Map((cardsRef.current || []).map((c) => [c.id, c]));
+    const restored = sess.ids.map((id) => byId.get(id)).filter(Boolean);
+    if (restored.length === 0) { clearListenSession(); return; }
+    const ri = Math.min(Math.max(0, sess.idx | 0), restored.length - 1);
+    setQueue(restored);
+    setIdx(ri);
+    setPhase(""); // '완료'가 아니므로 재생 버튼이 '이어 재생'으로 표시됨
   }, []);
+
+  // [백그라운드 재생] 화면이 꺼지거나 앱이 백그라운드로 가도 재생을 끊지 않는다.
+  // 무음 keepalive 트랙으로 오디오 세션을 살려두면 그 위로 TTS가 이어 재생된다(베스트에포트).
+  // iOS가 그래도 멈추면, 잠금화면 컨트롤(▶)이나 앱 복귀 후 재생 버튼으로 이어 들으면 된다.
+  // 복귀 시 keepalive가 끊겼을 수 있어 다시 깨워 둔다.
+  useEffect(() => {
+    const onShow = () => {
+      if (!document.hidden && playing) startKeepAlive();
+    };
+    document.addEventListener("visibilitychange", onShow);
+    return () => document.removeEventListener("visibilitychange", onShow);
+  }, [playing]);
 
   // 재생 중에는 화면이 자동으로 꺼지지 않도록 Wake Lock을 건다. (토글 ON일 때만)
   // (iOS Safari 16.4+ 지원. 미지원 기기면 조용히 무시되고 평소처럼 동작.)
@@ -2027,7 +2155,8 @@ function ListenView({ cards, voiceRef, decks }) {
     };
   }, [playing, cfg.keepAwake]);
 
-  const cur = playing && queue[idx] ? queue[idx] : null;
+  // 재생 중이거나 이어들을 큐가 남아 있으면 현재 카드를 최신 내용으로 보여준다.
+  const cur = (queue[idx] && phase !== "완료") ? freshCard(queue[idx]) : null;
   const koVoiceAvailable = !!pickKoVoice();
 
   return (
@@ -2066,6 +2195,9 @@ function ListenView({ cards, voiceRef, decks }) {
 
       {/* 컨트롤 */}
       <div className="listen-controls">
+        <button className="listen-prev" onClick={prev} disabled={queue.length === 0}>
+          <span style={{ display: "inline-flex", transform: "scaleX(-1)" }}><Icon.Next /></span> 이전
+        </button>
         {!playing ? (
           <button className="listen-play" onClick={start}>
             <Icon.Play /> {queue.length > 0 && idx < queue.length && phase !== "완료" ? "이어 재생" : "재생"}
@@ -2073,7 +2205,7 @@ function ListenView({ cards, voiceRef, decks }) {
         ) : (
           <button className="listen-play listen-stop" onClick={stop}><Icon.Pause /> 정지</button>
         )}
-        <button className="listen-next" onClick={next} disabled={!playing}><Icon.Next /> 다음</button>
+        <button className="listen-next" onClick={next} disabled={queue.length === 0}><Icon.Next /> 다음</button>
       </div>
       {(queue.length > 0) && (
         <button className="listen-restart" onClick={restart}>처음부터 다시</button>
@@ -2150,9 +2282,7 @@ function ListenView({ cards, voiceRef, decks }) {
       </div>
 
       <div className="listen-note">
-        {cfg.keepAwake
-          ? "다른 앱으로 가거나 직접 잠금하면 멈춰요. 다시 재생 버튼을 누르면 이어서 들을 수 있어요."
-          : "화면이 꺼지면 멈춰요. 다시 재생 버튼을 누르면 이어서 들을 수 있어요."}
+        화면이 꺼지거나 다른 앱으로 가도 이어서 들을 수 있어요(기기에 따라 다름). 잠금화면의 ▶·⏭ 컨트롤로도 조작할 수 있고, 멈추면 재생 버튼으로 다시 이어집니다.
       </div>
       </>
       )}
@@ -4586,10 +4716,10 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
   background: var(--accent); color: #fff; font-size: 16px; font-weight: 700;
   display: flex; align-items: center; justify-content: center; gap: 8px; word-break: keep-all; }
 .listen-play.listen-stop { background: var(--ink); }
-.listen-next { flex: 1; height: 52px; border-radius: 14px; cursor: pointer;
+.listen-next, .listen-prev { flex: 1; height: 52px; border-radius: 14px; cursor: pointer;
   border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent);
   font-size: 15px; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px; }
-.listen-next:disabled { opacity: .45; cursor: default; border-color: var(--line); background: var(--surface); color: var(--ink-2); }
+.listen-next:disabled, .listen-prev:disabled { opacity: .45; cursor: default; border-color: var(--line); background: var(--surface); color: var(--ink-2); }
 .listen-restart { width: 100%; height: 36px; border-radius: 11px; border: none; cursor: pointer;
   background: none; color: var(--ink-2); font-size: 13px; font-weight: 600; margin-bottom: 4px;
   text-decoration: underline; text-underline-offset: 3px; }
