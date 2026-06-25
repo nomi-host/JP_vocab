@@ -2000,12 +2000,15 @@ async function bakeQueue(cards, opts, onProgress, isCancelled) {
   await Promise.all(Array.from({ length: Math.min(CONC, uniq.length) }, worker));
   if (isCancelled && isCancelled()) return null;
   // 순서대로 이어붙이기 + 사이 무음
+  // GAP_MULT로 세그먼트(단어/뜻/예문/예문뜻) 사이 간격을 조절한다(크게 할수록 길게 쉼).
   const sil = silentBytes();
+  const GAP_MULT = 4;
   const parts = [];
   for (const s of plan) {
     const b = bytesByKey.get(keyOf(s));
     if (b && b.length) parts.push(b);
-    for (let n = 0; n < (s.brk || 1); n++) parts.push(sil);
+    const units = (s.brk || 1) * GAP_MULT;
+    for (let n = 0; n < units; n++) parts.push(sil);
   }
   return new Blob(parts, { type: "audio/mpeg" });
 }
@@ -2050,6 +2053,7 @@ function ListenView({ cards, voiceRef, decks }) {
   const [bakeMsg, setBakeMsg] = useState("");
   const [bgTime, setBgTime] = useState(0);
   const [bgDur, setBgDur] = useState(0);
+  const [bgList, setBgList] = useState([]); // 현재 굽고/재생 중인 30단어(화면 표시용)
   const bgUrlRef = useRef(null);
   const bgCancelRef = useRef(false);
   const bgCountRef = useRef(0);
@@ -2067,7 +2071,7 @@ function ListenView({ cards, voiceRef, decks }) {
     return seededShuffle(pool, daySeed).slice(0, BG_COUNT);
   };
   const bgKeyFor = (list) =>
-    "bg|v1|" + list.map((c) => c.id).join(".") + "|r" + (cfg.repeat || 1) +
+    "bg|v2|" + list.map((c) => c.id).join(".") + "|r" + (cfg.repeat || 1) +
     "|ko" + (cfg.koVoice ? 1 : 0) + "|" + bakeGender() + "|" + (ttsSettings.rate || 0.95);
 
   const playBgBlob = (blob, count) => {
@@ -2094,6 +2098,7 @@ function ListenView({ cards, voiceRef, decks }) {
     const list = buildBgList();
     if (list.length === 0) { setBakeMsg("재생할 단어가 없어요"); setBgState("idle"); return; }
     bgCountRef.current = list.length;
+    setBgList(list); // 화면에 30단어 목록 표시
     const key = bgKeyFor(list);
     bgCancelRef.current = false;
     setBgState("baking"); setBakeMsg("음성 준비 중…"); setBgTime(0); setBgDur(0);
@@ -2539,6 +2544,28 @@ function ListenView({ cards, voiceRef, decks }) {
       </div>
       {(bgState === "playing" || bgState === "paused" || bgState === "done") && (
         <button className="listen-restart" onClick={bgStop}>정지하고 처음으로</button>
+      )}
+
+      {/* 재생 중인 30단어 — 화면 켜면 쭉 훑어볼 수 있게 */}
+      {(bgState === "playing" || bgState === "paused") && bgList.length > 0 && (
+        <div className="bg-list">
+          {bgList.map((c, i) => (
+            <div key={c.id} className="bg-list-item">
+              <div className="bg-list-head">
+                <span className="bg-list-num">{i + 1}</span>
+                <span className="bg-list-word">{c.word}</span>
+                {c.hasKanji && c.reading && <span className="bg-list-reading">{c.reading}</span>}
+              </div>
+              <div className="bg-list-mean">{c.meaning}</div>
+              {c.ex && c.ex.ja && (
+                <div className="bg-list-ex">
+                  <div className="bg-list-ex-ja">{c.ex.ja}</div>
+                  {c.ex.ko && <div className="bg-list-ex-ko">{c.ex.ko}</div>}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       )}
 
       {(bgState === "idle" || bgState === "done") && (
@@ -5006,6 +5033,18 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
   background: none; color: var(--ink-2); font-size: 13.5px; font-weight: 700; word-break: keep-all;
   padding: 6px 8px; line-height: 1.3; }
 .listen-mode-btn.on { background: var(--accent); color: #fff; }
+
+/* 백그라운드 재생 중 30단어 목록 */
+.bg-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0 4px; }
+.bg-list-item { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--surface); }
+.bg-list-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.bg-list-num { font-size: 11px; font-weight: 700; color: var(--ink-2); min-width: 18px; }
+.bg-list-word { font-size: 17px; font-weight: 700; color: var(--ink); }
+.bg-list-reading { font-size: 12px; color: var(--ink-2); }
+.bg-list-mean { font-size: 14px; color: var(--ink); margin-top: 3px; }
+.bg-list-ex { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); }
+.bg-list-ex-ja { font-size: 13.5px; color: var(--ink); }
+.bg-list-ex-ko { font-size: 12.5px; color: var(--ink-2); margin-top: 2px; }
 
 .listen-src { display: flex; gap: 7px; flex-wrap: wrap; }
 .listen-src-btn { flex: 1; min-width: 90px; min-height: 40px; padding: 6px 10px; border-radius: 11px;
