@@ -383,10 +383,10 @@ function displayWord(card) {
 }
 
 /* 단어 발음용 텍스트: 한자어면 요미가나(히라가나)로 읽어 후리가나와 일치시킴 */
-/* '~'(물결, 반각/전각 2종 모두)를 'なに'로 읽게 치환
+/* '~'(물결 여러 종)+'-'(하이픈/대시류, placeholder)를 'なになに'로 치환 (장음 ー 제외)
    (예: ~を禁じ得ない / 〜を禁じ得ない → なにをきんじえない) */
 function tildeToYomi(s) {
-  return (s || "").replace(/[~\u301C\uFF5E\u223C\u002D\u2010\u2011\u2013\u2014\u2212\uFF0D]+/g, "なに");
+  return (s || "").replace(/[~\u301C\uFF5E\u223C\u002D\u2010\u2011\u2013\u2014\u2212\uFF0D]+/g, "なになに");
 }
 /* 단어 발음용 텍스트:
    - 상용외(희귀) 한자가 든 단어만 요미가나(히라가나)로 읽어 엔진 오독을 피한다.
@@ -425,6 +425,10 @@ function withWordStop(s) {
    예) うっとり → 엔진이 'うっ(감탄사)+とり'로 끊어 읽어, 한 단어로 인식되기 쉬운 가타카나로. */
 const WORD_SPEECH_OVERRIDE = {
   "うっとり": "ウットリ",
+  // 〜と〜と: placeholder 두 번이 열거로 읽혀 사이가 길게 쉼 → 하나로 합쳐 침묵 제거(뉘앙스 약화 감수)
+  "~と~とが相まって": "なになにがあいまって",
+  // こととて: 가나라 こと|とて로 과분절 → 事(こと)로 한 덩어리 인식 유도
+  "〜こととて": "〜事とて",
 };
 function wordSpeech(card) {
   const ov = WORD_SPEECH_OVERRIDE[card.word] || (card.reading && WORD_SPEECH_OVERRIDE[card.reading]);
@@ -4294,7 +4298,7 @@ function loadCards() {
 
 /* 과거 SEED에 있었다가 오류로 제거된 단어들(레거시 저장본 정리용).
    fromSeed 플래그가 없는 옛 저장본에서 이 단어들만 안전하게 제거한다. */
-const REMOVED_SEED_WORDS = new Set(["打ち回り", "明かる", "家電製品売り場"]);
+const REMOVED_SEED_WORDS = new Set(["打ち回り", "明かる", "家電製品売り場", "をもって", "かたがた", "こととて", "ためらう(躊躇う)", "~傍ら", "〜だろうに"]);
 // 묶음(대조/병렬) 표기로 보이는 옛 단어 판별: 구분기호가 들어간 단어
 function looksBundled(word) {
   return /[↔≠／/・]/.test(word) || /\s\/\s/.test(word);
