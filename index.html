@@ -386,7 +386,7 @@ function displayWord(card) {
 /* '~'(물결, 반각/전각 2종 모두)를 'なに'로 읽게 치환
    (예: ~を禁じ得ない / 〜を禁じ得ない → なにをきんじえない) */
 function tildeToYomi(s) {
-  return (s || "").replace(/[~\u301C\uFF5E\u223C]+/g, "なに");
+  return (s || "").replace(/[~\u301C\uFF5E\u223C\u002D\u2010\u2011\u2013\u2014\u2212\uFF0D]+/g, "なに");
 }
 /* 단어 발음용 텍스트:
    - 상용외(희귀) 한자가 든 단어만 요미가나(히라가나)로 읽어 엔진 오독을 피한다.
@@ -489,11 +489,11 @@ function meaningSpeech(meaning) {
   // 물결표(~〜)는 뒤따르는 조사에 따라 '무엇'/'뭐뭐'로 분기해 자연스럽게 읽는다.
   //  - 뒤가 '이/가' → "무엇"(무엇이, 무엇이…)   - 뒤가 '나' → "무엇이나"
   //  - 그 외(하다·인·보다 등 일반) → "뭐뭐"(뭐뭐하다, 뭐뭐인 척…)
-  s = s.replace(/[~～]\s*(이나|[이가나])/g, (mt, jo) => {
+  s = s.replace(/[~～\u002D\u2010\u2011\u2013\u2014\u2212\uFF0D]\s*(이나|[이가나])/g, (mt, jo) => {
     if (jo === "나" || jo === "이나") return "무엇이나";
     return "무엇이";                // 이/가 → '무엇이'(받침 뒤 주격조사는 '이')
   });
-  s = s.replace(/[~～]/g, "뭐뭐");   // 남은 물결표는 일반형
+  s = s.replace(/[~～\u002D\u2010\u2011\u2013\u2014\u2212\uFF0D]/g, "뭐뭐");   // 남은 물결표는 일반형
   // 남은 특수기호·표기 제거
   s = s.replace(/[↔≠/／·*]/g, " ");
   s = s.replace(/\b(cf|例|ex|例文)\s*[:：.]?/gi, " ");
@@ -510,8 +510,8 @@ function meaningSpeech(meaning) {
   // 혹시 다 지워졌으면 원본을 최소 정제만 해서 반환
   if (!s) {
     let t = (meaning || "");
-    t = t.replace(/[~～]\s*(이나|[이가나])/g, (mt, jo) => (jo === "나" || jo === "이나") ? "무엇이나" : "무엇이");
-    t = t.replace(/[~～]/g, "뭐뭐").replace(/[↔≠/／]/g, " ").replace(/\s+/g, " ").trim();
+    t = t.replace(/[~～\u002D\u2010\u2011\u2013\u2014\u2212\uFF0D]\s*(이나|[이가나])/g, (mt, jo) => (jo === "나" || jo === "이나") ? "무엇이나" : "무엇이");
+    t = t.replace(/[~～\u002D\u2010\u2011\u2013\u2014\u2212\uFF0D]/g, "뭐뭐").replace(/[↔≠/／]/g, " ").replace(/\s+/g, " ").trim();
     s = t;
   }
   // 끝에 마침표를 붙여 마지막 음절이 잘리는 끝음 문제를 막는다.
@@ -797,6 +797,30 @@ async function lookupDictionary(query, allWords) {
     return { word: hit.word, reading: hit.reading, meaning: hit.meaning, source: "local" };
   }
   return { word: q, reading: "", meaning: "", source: "none" };
+}
+
+/* ===== 같은 단어(표기 변이) 판정 — 등록 시 중복 검사용 =====
+   같은 단어로 보는 경우:
+   1) 물결(~〜)·공백만 다른 경우 (かたがた ↔ ~かたがた)
+   2) 한쪽은 가나표기, 한쪽은 한자표기인데 발음이 같은 경우 (かたがた ↔ 方々)
+   3) 둘 다 한자인데 '한자골격'+발음이 같은 경우 = 送り仮名 차이 (打合せ ↔ 打ち合わせ)
+   다른 단어로 보는 경우(중복 아님):
+   - 둘 다 한자인데 한자가 다르고 발음만 같음 = 동음이의/이자 (晒す ↔ 曝す, 橋 ↔ 箸)
+   - 같은 단어라도 '뜻'이 다르면 별도 등록 허용 → 하드블록이 아닌 '경고(확인)'로 처리. */
+function _stripTilde(s) { return (s || "").replace(/[~〜～∼\s]/g, ""); }
+function _isKanaOnly(s) { if (!s) return false; for (const ch of s) if (isKanjiChar(ch)) return false; return true; }
+function _kanjiSkel(s) { let o = ""; for (const ch of (s || "")) if (isKanjiChar(ch)) o += ch; return o; }
+function sameWordVariant(aw, ar, bw, br) {
+  const A = _stripTilde(aw), B = _stripTilde(bw);
+  if (!A || !B) return false;
+  if (A === B) return true;                         // 1) 물결/공백만 차이
+  const aKana = _isKanaOnly(A), bKana = _isKanaOnly(B);
+  const aForm = aKana ? A : _stripTilde(ar);        // 발음(가나)형
+  const bForm = bKana ? B : _stripTilde(br);
+  if (aKana !== bKana && aForm && aForm === bForm) return true; // 2) 가나표기 ↔ 한자표기, 발음 동일
+  if (!aKana && !bKana && aForm && aForm === bForm   // 3) 둘 다 한자 + 발음 동일 + 한자골격 동일(送り仮名 차이)
+      && _kanjiSkel(A) && _kanjiSkel(A) === _kanjiSkel(B)) return true;
+  return false;
 }
 
 /* ===================== 스케줄링 ===================== */
@@ -2792,11 +2816,13 @@ function AddView({ cards, setCards, voiceRef }) {
       setNote("단어와 뜻은 필수예요.");
       return;
     }
-    // 같은 일본어 단어가 이미 있으면 경고하고, 사용자가 확인할 때만 추가
-    const dup = cards.find((c) => c.word === word);
+    // 같은 단어(표기 변이 포함: ~물결, 가나↔한자, 送り仮名 차이)가 이미 있으면 경고.
+    // 뜻이 다르면 별도 등록을 허용해야 하므로 하드블록이 아닌 확인(confirm)으로 처리.
+    const reading = form.reading.trim();
+    const dup = cards.find((c) => sameWordVariant(c.word, c.reading, word, reading));
     if (dup) {
-      const ok = confirm(`'${word}'은(는) 이미 등록된 단어예요.\n그래도 추가할까요?`);
-      if (!ok) { setNote(`'${word}'은(는) 이미 있는 단어예요. 추가하지 않았어요.`); return; }
+      const ok = confirm(`이미 같은 단어로 보이는 게 있어요:\n  '${dup.word}' — ${dup.meaning}\n\n뜻이 다르면 [확인]으로 추가하고, 같은 뜻이면 [취소]하세요.`);
+      if (!ok) { setNote(`'${dup.word}'와(과) 같은 단어로 보여 추가하지 않았어요.`); return; }
     }
     const exJa = form.exJa.trim();
     const ex = exJa
