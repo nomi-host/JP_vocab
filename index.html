@@ -425,8 +425,6 @@ function withWordStop(s) {
    예) うっとり → 엔진이 'うっ(감탄사)+とり'로 끊어 읽어, 한 단어로 인식되기 쉬운 가타카나로. */
 const WORD_SPEECH_OVERRIDE = {
   "うっとり": "ウットリ",
-  // 〜と〜と: placeholder 두 번이 열거로 읽혀 사이가 길게 쉼 → 하나로 합쳐 침묵 제거(뉘앙스 약화 감수)
-  "~と~とが相まって": "なになにがあいまって",
   // こととて: 가나라 こと|とて로 과분절 → 事(こと)로 한 덩어리 인식 유도
   "〜こととて": "〜事とて",
 };
@@ -4298,7 +4296,7 @@ function loadCards() {
 
 /* 과거 SEED에 있었다가 오류로 제거된 단어들(레거시 저장본 정리용).
    fromSeed 플래그가 없는 옛 저장본에서 이 단어들만 안전하게 제거한다. */
-const REMOVED_SEED_WORDS = new Set(["打ち回り", "明かる", "家電製品売り場", "をもって", "かたがた", "こととて", "ためらう(躊躇う)", "~傍ら", "〜だろうに"]);
+const REMOVED_SEED_WORDS = new Set(["打ち回り","明かる","家電製品売り場","をもって","かたがた","こととて","ためらう(躊躇う)","~傍ら","～傍ら","〜傍ら","~だろうに","～だろうに","〜だろうに"]);
 // 묶음(대조/병렬) 표기로 보이는 옛 단어 판별: 구분기호가 들어간 단어
 function looksBundled(word) {
   return /[↔≠／/・]/.test(word) || /\s\/\s/.test(word);
@@ -4314,6 +4312,9 @@ function reconcileWithSeed(stored) {
   const seenWords = new Set();
   const out = [];
   for (const c of stored) {
+    // 삭제 확정 단어는 최우선으로 제거. (과거 reconcile이 fromSeed:false로 재저장해버려도
+    //  아래 fromSeed===false 분기보다 먼저 잡아 확실히 버린다.)
+    if (REMOVED_SEED_WORDS.has(c.word)) continue;
     const seed = seedByWord.get(c.word);
     if (seed) {
       if (seenWords.has(c.word)) continue; // 중복 저장본 제거
@@ -4328,8 +4329,8 @@ function reconcileWithSeed(stored) {
       seenWords.add(c.word);
     } else if (c.fromSeed === false) {
       out.push({ ...c, fromSeed: false }); // 사용자 추가 단어
-    } else if (REMOVED_SEED_WORDS.has(c.word) || looksBundled(c.word)) {
-      // 제거 대상(옛 기본 단어 / 분리 전 묶음 단어) → 버림
+    } else if (looksBundled(c.word)) {
+      // 분리 전 묶음 단어 → 버림
     } else {
       // 플래그 없는 미상 단어: 안전하게 유지(레거시 사용자 추가일 수 있음)
       out.push({ ...c, fromSeed: false });
