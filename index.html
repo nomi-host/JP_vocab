@@ -102,6 +102,29 @@ function wordsWithKanji(ch, n, pool) {
 /* SEED에 실제 카드로 존재하는 단어 집합(관련 단어 탭 이동 가능 여부 판정용) */
 const SEED_WORDS = new Set(SEED.map((c) => c.word));
 
+/* 부수(radical)가 같은 한자 찾기 — 한자 상세에서 '같은 부수 한자' 표시용.
+   예) 踏(부수 足) → 足·跡·践·路… 처럼 같은 발(足) 부수 한자. 누르면 그 한자 상세로.
+   인덱스는 한 번만 만들어 캐시. 흔한 한자(grade 낮음, 획수 적음) 순으로 정렬. */
+let _radicalIndex = null;
+function kanjiByRadical(radical, excludeCh, limit) {
+  if (!radical) return [];
+  if (!_radicalIndex) {
+    _radicalIndex = {};
+    for (const ch in KANJI) {
+      const r = KANJI[ch] && KANJI[ch].radical;
+      if (!r) continue;
+      (_radicalIndex[r] = _radicalIndex[r] || []).push(ch);
+    }
+  }
+  const list = (_radicalIndex[radical] || []).filter((ch) => ch !== excludeCh);
+  list.sort((a, b) => {
+    const ga = Number(KANJI[a].grade) || 99, gb = Number(KANJI[b].grade) || 99;
+    if (ga !== gb) return ga - gb;
+    return (Number(KANJI[a].strokes) || 99) - (Number(KANJI[b].strokes) || 99);
+  });
+  return limit ? list.slice(0, limit) : list;
+}
+
 /* ===================== 유틸 ===================== */
 const DAY = 86400000;
 /* '오늘' 기준: 한국시간(KST, UTC+9) 기준으로 날짜를 계산하되,
@@ -266,6 +289,11 @@ function setMediaMeta(title, artist) {
   try {
     navigator.mediaSession.metadata = new MediaMetadata({
       title: title || "", artist: artist || "", album: "일본어 단어장",
+      // 잠금화면/다이내믹 아일랜드에 표시할 앱 아이콘(앨범아트). icon_high.jpg를 앱 루트에 둔다.
+      artwork: [
+        { src: "icon_high.jpg", sizes: "256x256", type: "image/jpeg" },
+        { src: "icon_high.jpg", sizes: "512x512", type: "image/jpeg" },
+      ],
     });
   } catch {}
 }
@@ -427,17 +455,21 @@ const WORD_SPEECH_OVERRIDE = {
   "うっとり": "ウットリ",
   // こととて: 가나라 こと|とて로 과분절 → 事(こと)로 한 덩어리 인식 유도
   "〜こととて": "〜事とて",
+  // 相まって: 한자원문이면 相=ソウ로 오독 → 읽기(あいまって)로. ~と~とが…는 と를 살려 읽기로.
+  "相まって": "あいまって",
+  "~と~とが相まって": "~と~とがあいまって",
+  // 〜つ〜つ: なになにつなになにつ로 붙어 어색 → 쉼표로 끊어 なになにつ、なになにつ
+  "〜つ〜つ": "〜つ、〜つ",
 };
 function wordSpeech(card) {
   const ov = WORD_SPEECH_OVERRIDE[card.word] || (card.reading && WORD_SPEECH_OVERRIDE[card.reading]);
   if (ov) return withWordStop(tildeToYomi(ov));
   const clean = card.word.split(/[／/・↔≠\s(]/)[0];
-  // 한자어·구형 표현 모두 저장된 읽기(후리가나)로 발음한다.
-  // 한자원문을 보내면 多音 한자를 엔진이 오독한다(예: 相まって→そうまって, 相=ソウ).
-  // 단어를 통째로 읽으므로 읽기 속 조사(は/が/と…)도 올바르게 발음된다.
-  if (card.hasKanji && card.reading) {
-    return withWordStop(tildeToYomi(card.reading.split(/[／/・↔≠\s(]/)[0]));
-  }
+  // 단어는 '한자 원문 그대로' 보낸다(사전형으로 또렷하게).
+  // 읽기(히라가나)로 보내면 고립된 가나가 오분절된다: 潤い→'うる、おい！', 倒す→'たおす〜', 干す→'ほす〜'.
+  // 한자 원문은 엔진이 사전형으로 정확히 읽는다(潤い→うるおい, 倒す→たおす).
+  // 단, 多音 한자를 오독하는 일부 단어만 WORD_SPEECH_OVERRIDE에 읽기로 등록해 '걸러서' 히라가나로 보낸다
+  //  (예: 相まって→あいまって(相=あい), 相まって를 그대로 보내면 相=ソウ로 오독).
   return withWordStop(tildeToYomi(clean));
 }
 
@@ -1213,6 +1245,7 @@ function DetailModal({ card, onClose, voiceRef, allCards }) {
 
   const info = sel ? KANJI[sel] : null;
   const relWords = sel ? wordsWithKanji(sel, 40, allCards) : [];
+  const sameRad = (info && info.radical) ? kanjiByRadical(info.radical, sel, 40) : [];
   const jlptLabel = info && info.jlpt ? "N" + info.jlpt : null;
 
   return ReactDOM.createPortal(
@@ -1255,7 +1288,9 @@ function DetailModal({ card, onClose, voiceRef, allCards }) {
                       <span className="wd-kanji-info">
                         <span className="wd-kanji-top">
                           {kjl && <span className="wd-kanji-jlpt">{kjl}</span>}
-                          {ki && ki.kr && <span className="wd-kanji-kr">{ki.kr}</span>}
+                          {ki && (ki.kr
+                            ? <span className="wd-kanji-kr">{ki.kr}</span>
+                            : <span className="wd-kanji-kr wd-kanji-jp">(일본한자)</span>)}
                         </span>
                         {ki && ki.on && ki.on.length > 0 && (
                           <span className="wd-kanji-read">음 {ki.on.slice(0,3).join(" ")}</span>
@@ -1292,7 +1327,9 @@ function DetailModal({ card, onClose, voiceRef, allCards }) {
 
             {info ? (
               <>
-                {info.kr && <div className="kanji-kr">{info.kr}</div>}
+                {info.kr
+                  ? <div className="kanji-kr">{info.kr}</div>
+                  : <div className="kanji-kr kanji-jp">(일본한자)</div>}
                 <div className="kanji-rows">
                   {info.on && info.on.length > 0 && (
                     <div className="kanji-row">
@@ -1328,6 +1365,20 @@ function DetailModal({ card, onClose, voiceRef, allCards }) {
               </>
             ) : (
               <div className="kanji-empty">이 한자의 상세 정보가 아직 없어요.</div>
+            )}
+
+            {sameRad.length > 0 && (
+              <div className="kanji-related">
+                <div className="kanji-section-label">같은 부수 한자 · {info.radical}{info.radicalKr ? " " + info.radicalKr : ""} ({sameRad.length})</div>
+                <div className="kanji-radical-grid">
+                  {sameRad.map((ch) => (
+                    <button key={ch} className="kanji-radical-cell" onClick={() => openKanji(ch)}>
+                      <span className="kanji-radical-glyph">{ch}</span>
+                      {KANJI[ch] && KANJI[ch].krSound && <span className="kanji-radical-sound">{KANJI[ch].krSound}</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
 
             {relWords.length > 0 && (
@@ -1775,15 +1826,13 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession, de
                   <div className="start-panel-hint">분류·단어장을 골라 학습해요</div>
                   <select className="start-select" value={catSel} onChange={(e) => setCatSel(e.target.value)}>
                     <option value="">분류 선택…</option>
-                    <option value="pos:mimetic">의성·의태어 ({cardsRef.current.filter((c) => !c.suspended && posClass(c) === "mimetic").length})</option>
-                    {decks && decks.length > 0 && (
-                      <optgroup label="내 단어장">
-                        {decks.map((d) => {
-                          const n = cardsRef.current.filter((c) => (c.decks || []).includes(d.id)).length;
-                          return <option key={d.id} value={"deck:" + d.id}>{d.name} ({n})</option>;
-                        })}
-                      </optgroup>
-                    )}
+                    <optgroup label="내 단어장">
+                      <option value="pos:mimetic">의성·의태어 ({cardsRef.current.filter((c) => !c.suspended && posClass(c) === "mimetic").length})</option>
+                      {decks && decks.map((d) => {
+                        const n = cardsRef.current.filter((c) => (c.decks || []).includes(d.id)).length;
+                        return <option key={d.id} value={"deck:" + d.id}>{d.name} ({n})</option>;
+                      })}
+                    </optgroup>
                   </select>
                   <div className="start-count-btns" style={{ marginTop: 8 }}>
                     {[10, 20, 30, 50].map((n) => (
@@ -1804,15 +1853,13 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession, de
                   <div className="start-panel-hint">이미 배운 단어를 다시 복습해요</div>
                   <select className="start-select" value={revSel} onChange={(e) => setRevSel(e.target.value)}>
                     <option value="">전체 (배운 단어 모두)</option>
-                    <option value="pos:mimetic">의성·의태어 ({cardsRef.current.filter((c) => !c.suspended && c.introducedOn && posClass(c) === "mimetic").length})</option>
-                    {decks && decks.length > 0 && (
-                      <optgroup label="내 단어장">
-                        {decks.map((d) => {
-                          const n = cardsRef.current.filter((c) => !c.suspended && c.introducedOn && (c.decks || []).includes(d.id)).length;
-                          return <option key={d.id} value={"deck:" + d.id}>{d.name} ({n})</option>;
-                        })}
-                      </optgroup>
-                    )}
+                    <optgroup label="내 단어장">
+                      <option value="pos:mimetic">의성·의태어 ({cardsRef.current.filter((c) => !c.suspended && c.introducedOn && posClass(c) === "mimetic").length})</option>
+                      {decks && decks.map((d) => {
+                        const n = cardsRef.current.filter((c) => !c.suspended && c.introducedOn && (c.decks || []).includes(d.id)).length;
+                        return <option key={d.id} value={"deck:" + d.id}>{d.name} ({n})</option>;
+                      })}
+                    </optgroup>
                   </select>
                   <div className="start-count-btns" style={{ marginTop: 8 }}>
                     {[10, 20, 30, 50].map((n) => (
@@ -2142,7 +2189,7 @@ async function bakeQueue(cards, opts, onProgress, isCancelled) {
   if (isCancelled && isCancelled()) return null;
   // 순서대로 이어붙이기 + 사이 무음(초 단위로 정확히).
   // 세그먼트 사이 0.3초, 카드(단어→다음 단어) 사이 0.6초.
-  const GAP_SEG = 1.0, GAP_CARD = 1.7;
+  const GAP_SEG = 1.5, GAP_CARD = 2.0;
   const silSeg = silenceBytes(GAP_SEG);
   const silCard = silenceBytes(GAP_CARD);
   const parts = [];
@@ -2212,7 +2259,7 @@ function ListenView({ cards, voiceRef, decks }) {
     return seededShuffle(pool, daySeed).slice(0, BG_COUNT);
   };
   const bgKeyFor = (list) =>
-    "bg|v8|" + list.map((c) => c.id).join(".") + "|r" + (cfg.repeat || 1) +
+    "bg|v9|" + list.map((c) => c.id).join(".") + "|r" + (cfg.repeat || 1) +
     "|ko" + (cfg.koVoice ? 1 : 0) + "|" + bakeGender() + "|" + (ttsSettings.rate || 0.95);
 
   const playBgBlob = (blob, count) => {
@@ -2314,13 +2361,13 @@ function ListenView({ cards, voiceRef, decks }) {
         setPhase("일본어");
         await playJaAsync(wordSpeech(card), voiceRef, ctl, "word");
         if (ctl.cancelled) return;
-        await sleep(350, ctl);
+        await sleep(1500, ctl);
 
         if (firstRep) {
           setPhase("뜻");
           await playKoAsync(meaningSpeech(card.meaning), ctl, cfg.koVoice);
           if (ctl.cancelled) return;
-          await sleep(350, ctl);
+          await sleep(1500, ctl);
         }
 
         const ex = card.ex;
@@ -2328,17 +2375,17 @@ function ListenView({ cards, voiceRef, decks }) {
           setPhase("예문");
           await playJaAsync(exampleSpeech(ex), voiceRef, ctl);
           if (ctl.cancelled) return;
-          await sleep(350, ctl);
+          await sleep(1500, ctl);
           if (ex.ko && firstRep) {
             setPhase("예문 뜻");
             await playKoAsync(ex.ko, ctl, cfg.koVoice);
             if (ctl.cancelled) return;
-            await sleep(350, ctl);
+            await sleep(1500, ctl);
           }
         }
-        await sleep(400, ctl); // 반복 사이 텀
+        await sleep(1500, ctl); // 반복 사이 텀
       }
-      await sleep(500, ctl); // 카드 사이 텀
+      await sleep(2000, ctl); // 카드 사이 텀
     }
     // 끝까지 재생 완료
     if (!ctl.cancelled) { setPlaying(false); setPhase("완료"); clearListenSession(); setMediaPlaybackState("none"); }
@@ -2530,15 +2577,13 @@ function ListenView({ cards, voiceRef, decks }) {
         <select className="start-select" style={{ marginTop: 8 }} value={cfg.cat}
           onChange={(e) => changeScope({ cat: e.target.value })}>
           <option value="">분류 선택…</option>
-          <option value="pos:mimetic">의성·의태어 ({cards.filter((c) => !c.suspended && posClass(c) === "mimetic").length})</option>
-          {decks && decks.length > 0 && (
-            <optgroup label="내 단어장">
-              {decks.map((d) => {
-                const n = cards.filter((c) => (c.decks || []).includes(d.id)).length;
-                return <option key={d.id} value={"deck:" + d.id}>{d.name} ({n})</option>;
-              })}
-            </optgroup>
-          )}
+          <optgroup label="내 단어장">
+            <option value="pos:mimetic">의성·의태어 ({cards.filter((c) => !c.suspended && posClass(c) === "mimetic").length})</option>
+            {decks && decks.map((d) => {
+              const n = cards.filter((c) => (c.decks || []).includes(d.id)).length;
+              return <option key={d.id} value={"deck:" + d.id}>{d.name} ({n})</option>;
+            })}
+          </optgroup>
         </select>
       )}
     </>
@@ -3467,12 +3512,12 @@ function FilterBar({ flt, setFlt, deckFlt, setDeckFlt, posFlt, setPosFlt, sort, 
           <div className="fb-panel-opts">
             <button className={"fb-opt" + (deckFlt === "all" && posFlt !== "mimetic" ? " on" : "")}
               onClick={() => { setDeckFlt("all"); setPosFlt("all"); setOpen(null); }}>단어장 전체</button>
+            <button className={"fb-opt" + (posFlt === "mimetic" ? " on" : "")}
+              onClick={() => { setPosFlt(posFlt === "mimetic" ? "all" : "mimetic"); setDeckFlt("all"); setOpen(null); }}>의성·의태어</button>
             {decks.map((d) => (
               <button key={d.id} className={"fb-opt" + (deckFlt === d.id ? " on" : "")}
                 onClick={() => { setDeckFlt(d.id); setPosFlt("all"); setOpen(null); }}>{d.name}</button>
             ))}
-            <button className={"fb-opt" + (posFlt === "mimetic" ? " on" : "")}
-              onClick={() => { setPosFlt(posFlt === "mimetic" ? "all" : "mimetic"); setDeckFlt("all"); setOpen(null); }}>의성·의태어</button>
           </div>
           <button className="fb-manage-btn" onClick={() => { setOpen(null); onManageDecks(); }}>
             ＋ 단어장 만들기·관리
@@ -4502,9 +4547,8 @@ function App() {
   }, [cards]);
 
   const refresh = useCallback(async () => {
-    // ===ADAPTER===: 실제 배포 시 서버에서 최신 단어/스케줄 동기화.
-    await new Promise((r) => setTimeout(r, 400));
-    setVersion((v) => v + 1);
+    // 당겨서 새로고침 = 페이지 전체 강제 새로고침(index.html 다시 로드).
+    try { window.location.reload(); } catch { setVersion((v) => v + 1); }
   }, []);
 
   const ptr = usePullToRefresh(refresh);
@@ -5288,6 +5332,15 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .kanji-empty { color: var(--muted); font-size: 15px; padding: 20px 0; line-height: 1.6; word-break: keep-all; }
 .kanji-related { text-align: left; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
 .kanji-section-label { font-size: 15px; font-weight: 700; color: var(--ink); margin-bottom: 12px; }
+/* 일본한자(한글 음·훈 없음) 표기 */
+.wd-kanji-jp, .kanji-jp { color: var(--muted); font-weight: 600; }
+/* 같은 부수 한자 그리드 */
+.kanji-radical-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 8px; }
+.kanji-radical-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 8px 4px; }
+.kanji-radical-cell:active { background: var(--accent-soft); }
+.kanji-radical-glyph { font-size: 24px; color: var(--ink); line-height: 1.1; }
+.kanji-radical-sound { font-size: 11px; color: var(--muted); }
 .kanji-word-row { display: flex; align-items: center; gap: 12px; width: 100%;
   padding: 12px 2px; border-bottom: 1px solid var(--line);
   background: none; border-left: none; border-right: none; border-top: none;
