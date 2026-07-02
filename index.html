@@ -230,11 +230,24 @@ const dayStrFrom = (ms) => {
   return shifted.toISOString().slice(0, 10);
 };
 const uid = () => Math.random().toString(36).slice(2, 10);
-// 모달(Portal) 안에서의 터치를 .scroll-area(당겨서 새로고침)로 흘려보내지 않기 위한 헬퍼.
-// React portal은 DOM상 document.body에 그려져도 React 트리 상으로는 여전히 .scroll-area의
-// 자손이라, 모달 안에서 아래로 스와이프하면 그 터치가 그대로 버블링돼 pull-to-refresh가
-// 오작동(페이지 강제 새로고침 → 메인화면으로 튕김)했다. 오버레이에서 막아 차단한다.
-const stopTouchBubble = (e) => e.stopPropagation();
+// 열려 있는 모달(Portal) 개수 카운터. React portal은 DOM상 document.body에 그려져도
+// React 트리 상으로는 여전히 .scroll-area/swipe-wrap의 자손이라, 모달 안에서 스크롤/스와이프하면
+// 그 터치가 그대로 버블링돼 pull-to-refresh(당겨서 새로고침)나 학습카드 스와이프 채점이
+// 오작동할 수 있다. 모달이 열려 있는 동안만 그 제스처들을 잠깐 꺼서 막는다.
+// (모달 자체에 stopPropagation 핸들러를 붙이는 방식은 매 터치프레임마다 React 합성 이벤트를
+// 거치게 되어 iOS에서 스크롤이 간헐적으로 멈추는 부작용이 있어, 카운터 방식으로 대체했다.)
+let openModalCount = 0;
+// isOpen을 명시적으로 받는다: DetailModal/DeckManager처럼 열렸을 때만 마운트되는
+// 컴포넌트는 기본값(true)으로 충분하지만, WordDetailModal처럼 항상 마운트된 채
+// card prop으로 열림/닫힘을 표현하는 컴포넌트는 그 조건을 그대로 넘겨야
+// "닫혀 있는데도 카운터가 계속 잡혀 있는" 버그를 피할 수 있다.
+function useModalOpenFlag(isOpen) {
+  useEffect(() => {
+    if (isOpen === false) return;
+    openModalCount++;
+    return () => { openModalCount--; };
+  }, [isOpen]);
+}
 const fmtClock = (s) => {
   const m = Math.floor(s / 60);
   const ss = s % 60;
@@ -2345,6 +2358,7 @@ function FuriganaText({ tokens, showFuri }) {
    1) 단어 상세: 단어+읽기+뜻+품사+예문 + (한자어면) 한자 카드 목록 + 네이버/사전 링크
    2) 한자 상세: 한자 카드를 누르면 그 한자의 음훈독·부수·획수·뜻·활용단어 표시 */
 function DetailModal({ card, onClose, voiceRef, allCards, cards, decks, onToggleStar, onTogglePriority, onToggleDeck, onCreateDeck }) {
+  useModalOpenFlag();
   // 방문 기록 스택: 각 항목 { kind:"word"|"kanji", card?, kanji? }
   const [stack, setStack] = useState([{ kind: "word", card }]);
   const top = stack[stack.length - 1];
@@ -2369,13 +2383,49 @@ function DetailModal({ card, onClose, voiceRef, allCards, cards, decks, onToggle
   const canBack = stack.length > 1;
   const goBack = () => { if (canBack) setStack((s) => s.slice(0, -1)); };
 
+  // 스와이프로 닫기: 시트 안 콘텐츠가 맨 위로 스크롤돼 있을 때 아래로 당기면 시트를 따라 내리고,
+  // 일정 거리 이상이면 닫는다. X버튼/오버레이 탭/Escape도 같은 닫힘 애니메이션을 공유.
+  const bodyRef = useRef(null);
+  const [dragY, setDragY] = useState(0);
+  const [closing, setClosing] = useState(false);
+  const drag = useRef({ dragging: false, startY: 0, scrollTop: 0 });
+  const CLOSE_ANIM_MS = 320;
+
+  const requestClose = () => {
+    setClosing(true);
+    setTimeout(onClose, CLOSE_ANIM_MS);
+  };
+
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === "Escape") { if (canBack) goBack(); else onClose(); }
+      if (e.key === "Escape") { if (canBack) goBack(); else requestClose(); }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose, canBack]);
+  }, [canBack]);
+
+  const onSheetTouchStart = (e) => {
+    drag.current.startY = e.touches[0].clientY;
+    drag.current.scrollTop = bodyRef.current ? bodyRef.current.scrollTop : 0;
+    drag.current.dragging = false;
+  };
+  const onSheetTouchMove = (e) => {
+    const dy = e.touches[0].clientY - drag.current.startY;
+    if (!drag.current.dragging) {
+      // 콘텐츠가 맨 위(scrollTop<=0)가 아니거나 위로 움직이면 일반 스크롤로 취급(시트는 그대로 둔다).
+      if (drag.current.scrollTop > 0 || dy <= 0) return;
+      drag.current.dragging = true;
+    }
+    setDragY(dy);
+    if (e.cancelable) e.preventDefault(); // 시트를 드래그하는 동안만 막아 러버밴드 바운스와 충돌 방지
+  };
+  const onSheetTouchEnd = () => {
+    if (drag.current.dragging) {
+      if (dragY > 100) requestClose();
+      else setDragY(0);
+    }
+    drag.current.dragging = false;
+  };
 
   // 한자 카드 클릭 → 한자 화면을 스택에 push
   const openKanji = (ch) => setStack((s) => [...s, { kind: "kanji", card: cur, kanji: ch }]);
@@ -2391,20 +2441,24 @@ function DetailModal({ card, onClose, voiceRef, allCards, cards, decks, onToggle
   const jlptLabel = info && info.jlpt ? "N" + info.jlpt : null;
 
   return ReactDOM.createPortal(
-    <div className="kanji-modal-overlay" onClick={onClose}
-      onTouchStart={stopTouchBubble} onTouchMove={stopTouchBubble} onTouchEnd={stopTouchBubble}>
-      <div className="kanji-modal" onClick={(e) => e.stopPropagation()}>
+    <div className={"kanji-modal-overlay" + (closing ? " closing" : "")} onClick={requestClose}>
+      <div className="kanji-modal" onClick={(e) => e.stopPropagation()}
+        onTouchStart={onSheetTouchStart} onTouchMove={onSheetTouchMove} onTouchEnd={onSheetTouchEnd}
+        style={{
+          transform: closing ? "translateY(100%)" : dragY ? `translateY(${dragY}px)` : undefined,
+          transition: closing ? `transform ${CLOSE_ANIM_MS}ms cubic-bezier(.32,.72,0,1)` : (drag.current.dragging ? "none" : "transform .32s cubic-bezier(.32,.72,0,1)"),
+        }}>
         <div className="kanji-modal-head">
           {canBack ? (
             <button className="kanji-modal-x" onClick={goBack} aria-label="뒤로"><Icon.Back /></button>
           ) : <span style={{ width: 34 }} />}
           <div className="kanji-modal-title">{view === "kanji" ? (sel || word) : word}</div>
-          <button className="kanji-modal-x" onClick={onClose} aria-label="닫기"><Icon.Close /></button>
+          <button className="kanji-modal-x" onClick={requestClose} aria-label="닫기"><Icon.Close /></button>
         </div>
 
         {view === "word" ? (
           /* ===== 1단계: 단어 상세 ===== */
-          <div className="kanji-modal-body word-detail">
+          <div className="kanji-modal-body word-detail" ref={bodyRef}>
             <button className="wd-word"
               onClick={() => speakSmart(wordSpeech(cur), voiceRef, null, "word")}
               title="발음 듣기">
@@ -2529,7 +2583,7 @@ function DetailModal({ card, onClose, voiceRef, allCards, cards, decks, onToggle
           </div>
         ) : (
           /* ===== 2단계: 한자 상세 ===== */
-          <div className="kanji-modal-body">
+          <div className="kanji-modal-body" ref={bodyRef}>
             {jlptLabel && <span className="kanji-jlpt">{jlptLabel}</span>}
             <button className="kanji-big"
               onClick={() => sel && speakSmart(sel, voiceRef, null, "word")}
@@ -2869,6 +2923,7 @@ function StudyView({ cards, setCards, voiceRef, timeLog, session, setSession, de
   };
 
   const onTouchStart = (e) => {
+    if (openModalCount > 0) return; // 모달이 열려 있으면 카드 스와이프 채점 비활성화
     const t = e.touches[0];
     swipe.current = { x: t.clientX, y: t.clientY, active: true, dir: null };
   };
@@ -4304,6 +4359,7 @@ function statusKind(c) {
 }
 
 function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, onDelete, voiceRef, decks, onToggleDeck, onCreateDeck, onTogglePriority, onToggleStar, allCards, cards }) {
+  useModalOpenFlag(!!card); // 이 컴포넌트는 항상 마운트돼 있고 card로 열림/닫힘을 표현한다
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(null);
   const [showDetail, setShowDetail] = useState(false); // 한자/단어 상세(DetailModal)
@@ -4358,8 +4414,7 @@ function WordDetailModal({ card, onClose, onSuspend, onUnsuspend, onSave, onDele
   };
 
   return ReactDOM.createPortal(
-    <div className="modal-overlay wd-overlay-pad" onClick={onClose}
-      onTouchStart={stopTouchBubble} onTouchMove={stopTouchBubble} onTouchEnd={stopTouchBubble}>
+    <div className="modal-overlay wd-overlay-pad" onClick={onClose}>
       <div className="modal wd-modal-cap" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <span className={"tag " + statusLabel(card).cls}>{statusLabel(card).text}</span>
@@ -4854,11 +4909,11 @@ function FilterBar({ flt, setFlt, deckFlt, setDeckFlt, posFlt, setPosFlt, sort, 
 
 /* 단어장 관리 모달: 생성·이름변경·삭제 */
 function DeckManager({ decks, cards, onClose, onCreate, onRename, onDelete }) {
+  useModalOpenFlag();
   const [newName, setNewName] = useState("");
   const countFor = (id) => cards.filter((c) => (c.decks || []).includes(id)).length;
   return ReactDOM.createPortal(
-    <div className="modal-overlay" onClick={onClose}
-      onTouchStart={stopTouchBubble} onTouchMove={stopTouchBubble} onTouchEnd={stopTouchBubble}>
+    <div className="modal-overlay" onClick={onClose}>
       <div className="modal deck-mgr" onClick={(e) => e.stopPropagation()}>
         <div className="deck-mgr-head">
           <h3>내 단어장</h3>
@@ -5612,6 +5667,7 @@ function usePullToRefresh(onRefresh) {
   const THRESH = 70;
 
   const onTouchStart = (e) => {
+    if (openModalCount > 0) return; // 모달이 열려 있으면 당겨서 새로고침 비활성화
     if (window.scrollY <= 0 && document.querySelector(".scroll-area")?.scrollTop <= 0) {
       startY.current = e.touches[0].clientY;
     }
@@ -6018,8 +6074,11 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .detail-btn:active { background: var(--fill); }
 
 /* 본문 */
+/* justify-content:center이면 카드마다 내용 총 높이가 살짝만 달라져도(의미 줄바꿈 등)
+   구분선 위치가 흔들려 보인다. flex-start로 위에서부터 쌓아 구분선 위치가 그 위 내용
+   (요미가나/단어/뜻)에만 결정되게 고정한다. */
 .card-body { flex: 1; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; padding: 0; }
+  align-items: center; justify-content: flex-start; padding: 24px 0 0; }
 .word-block { display: flex; flex-direction: column; align-items: center; gap: 10px;
   padding: 8px 0 12px; }
 .word-furi { font-size: 15px; color: var(--muted); letter-spacing: 2px;
@@ -6323,7 +6382,7 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
 .modal-decks-head { font-size: 13px; color: var(--ink-2); margin-bottom: 10px; }
 .modal-decks-head b { color: var(--ink); }
 .modal-decks-label { font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 8px; }
-.modal-deck-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.modal-deck-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; }
 .deck-chip { padding: 7px 12px; border-radius: 980px; border: 1px solid var(--line);
   background: var(--surface); color: var(--ink-2); font-size: 13px; font-weight: 600; cursor: pointer; }
 .deck-chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
@@ -6647,7 +6706,9 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
     rgba(0,0,0,0) var(--dim-top, 0px),
     rgba(0,0,0,.4) calc(var(--dim-top, 0px) + 200px));
   display: flex; align-items: flex-end; justify-content: center;
+  transition: opacity .32s cubic-bezier(.32,.72,0,1);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif; }
+.kanji-modal-overlay.closing { opacity: 0; }
 /* height:auto + max-height로, 내용이 짧으면 헤더 아래 여백을 남기고 뜬다(헤더에 바로 붙지 않게) */
 .kanji-modal { width: 100%; max-width: 480px; height: auto; max-height: 82vh; max-height: 82dvh;
   display: flex; flex-direction: column; overflow: hidden;
@@ -6732,6 +6793,7 @@ html, body { overscroll-behavior-x: none; overflow-x: hidden; }
   font-size: 13px; font-weight: 600; cursor: pointer; }
 .wd-act-star.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 .wd-decks { margin-bottom: 18px; }
+.wd-decks .modal-deck-chips { justify-content: flex-start; }
 .wd-rows { display: flex; flex-direction: column; gap: 10px; margin-bottom: 6px; }
 .wd-kanji-list { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--line); }
 .wd-kanji-card { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left;
